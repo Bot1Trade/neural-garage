@@ -160,3 +160,9 @@ Kaffeebar (+10 % Forschung) · Konferenzräume (+Qualität) · Fitness & Ruherau
 - Fenster startet maximiert, Seitenverhältnis frei (`stretch/aspect = expand`). UI skaliert mit, Schrift bleibt scharf.
 - Tutorial oben links (kollidiert nicht mehr mit der Seitenleiste), lange Texte in der Seitenleiste brechen um. Bei offener Seitenleiste rückt die Kamera nach links.
 - Grafik-Menü (Zahnrad oben rechts, gespeichert in `user://settings.json`): Kantenglättung bis 8×, Render-Auflösung 75–200 % (Supersampling), Schatten Mittel/Hoch/Ultra, Tilt-Shift an/aus, Vollbild (F11).
+
+## 14. Fokus-Budget (23.11.2026)
+
+- Pro Modell gibt es **10 Fokus-Punkte** (Hilfsbereitschaft, Coding, Kreativität, Sicherheit). Ziehst du einen Regler über das Budget, nimmt das Spiel Punkte vom stärksten anderen Bereich. Vorher konnte man alles auf 10 stellen, ohne Nachteil.
+- Ungenutzte Punkte kosten Qualität (bis −30 % bei 0 verteilten Punkten).
+- Code-Daten-Bonus 0,025 pro Coding-Punkt (vorher 0,015, aber ohne Obergrenze). Balance: 23 sichere AGI, 4 Pleiten, 3 Mal Helix zuerst (30 Bot-Runs).

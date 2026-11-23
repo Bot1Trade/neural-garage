@@ -130,4 +130,4 @@ static func era_focus(lab) -> Dictionary:
 	var f := {}
 	for k in D.FOCUS_KEYS:
 		f[k] = maxi(0, int(ideal[k]) + lab.rng.randi_range(-1, 1))
-	return f
+	return lab.scale_focus(f)

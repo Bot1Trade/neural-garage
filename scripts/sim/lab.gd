@@ -254,6 +254,42 @@ func default_design() -> Dictionary:
 	return {"name": "Modell-%d" % next_model_id, "arch": archs[archs.size() - 1]["id"], "size_index": 2,
 		"data": ["web"], "focus": {"help": 3, "code": 2, "creative": 3, "safety": 2}, "eval_days": 0}
 
+func focus_spent(focus: Dictionary) -> int:
+	var s := 0
+	for k in D.FOCUS_KEYS:
+		s += int(focus[k])
+	return s
+
+## Verteilt die Punkte so, dass die Summe genau `total` ist (Verhältnisse bleiben erhalten).
+func scale_focus(focus: Dictionary, total: int = D.FOCUS_BUDGET) -> Dictionary:
+	var sum := focus_spent(focus)
+	var out := {}
+	if sum <= 0:
+		for k in D.FOCUS_KEYS:
+			out[k] = 0
+		out["help"] = total
+		return out
+	var rest := total
+	var fracs := []
+	for k in D.FOCUS_KEYS:
+		var raw := float(focus[k]) * total / sum
+		out[k] = floori(raw)
+		rest -= int(out[k])
+		fracs.append([raw - floorf(raw), k])
+	fracs.sort_custom(func(a, b): return a[0] > b[0])
+	for i in range(rest):
+		out[fracs[i % fracs.size()][1]] = int(out[fracs[i % fracs.size()][1]]) + 1
+	return out
+
+## Mehr als das Budget wird anteilig gekürzt, weniger bleibt (kostet Qualität).
+func clamp_focus(focus: Dictionary) -> Dictionary:
+	if focus_spent(focus) > D.FOCUS_BUDGET:
+		return scale_focus(focus)
+	var out := {}
+	for k in D.FOCUS_KEYS:
+		out[k] = maxi(0, int(focus[k]))
+	return out
+
 func focus_fit(focus: Dictionary, ideal: Dictionary = {}) -> float:
 	if ideal.is_empty():
 		ideal = era()["ideal"]
@@ -283,7 +319,7 @@ func _model_risk(q: float, focus: Dictionary, data_risk: float, eval_days: int) 
 func evaluate_design(d: Dictionary) -> Dictionary:
 	var t := tech(d["arch"])
 	var params: float = D.SIZES[int(d["size_index"])]
-	var focus: Dictionary = d["focus"]
+	var focus: Dictionary = clamp_focus(d["focus"])
 	var data_q := 1.0
 	var data_risk := 0.0
 	var data_cost := 0.0
@@ -293,13 +329,14 @@ func evaluate_design(d: Dictionary) -> Dictionary:
 		var s: Dictionary = D.DATA[id]
 		data_q += float(s["quality"])
 		if id == "code":
-			data_q += 0.015 * float(focus["code"])
+			data_q += 0.025 * float(focus["code"])
 		data_risk += float(s["risk"])
 		data_cost += float(s["cost"]) * inflation() * sqrt(market()) * size_factor
 		if s.get("legal", false):
 			legal = true
 	data_risk /= maxf(1.0, d["data"].size())
 	var q: float = float(t["quality"]) * 10.0 * log(params * 1000.0) / log(10.0) * data_q * team_quality()
+	q *= 0.7 + 0.3 * float(focus_spent(focus)) / D.FOCUS_BUDGET   # ungenutzte Fokus-Punkte kosten Qualität
 	var gpu_days: float = 300.0 * pow(params, 1.3) / float(t["eff"])
 	var per_day := compute_power() * engineer_mult()
 	var train_days := INF if per_day <= 0.0 else gpu_days / per_day
@@ -313,6 +350,7 @@ func start_training(d: Dictionary) -> String:
 		return "Wähle mindestens eine Datenquelle."
 	if not techs.has(d["arch"]):
 		return "Architektur nicht erforscht."
+	d["focus"] = clamp_focus(d["focus"])
 	if compute_power() <= 0.0:
 		return "Du brauchst GPUs."
 	var ev := evaluate_design(d)

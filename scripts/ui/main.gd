@@ -71,6 +71,9 @@ var audio: Node
 var ui_ready := false
 var sound_popup: PopupPanel
 var gfx_popup: PopupPanel
+var focus_sliders := {}
+var focus_info: Label
+var focus_lock := false
 var gfx: Dictionary = {"tilt_shift": true, "msaa": 2, "scale": 1, "shadows": 2, "fullscreen": false}
 var office_view: Control
 var tutorial: PanelContainer
@@ -319,9 +322,30 @@ func _build_model_tab() -> void:
 		data_box.add_child(cb)
 	grid.add_child(data_box)
 
+	design["focus"] = lab.clamp_focus(design["focus"])
+	grid.add_child(_label("Fokus-Punkte", 15, C_DIM))
+	focus_info = _label("", 14, C_DIM)
+	grid.add_child(focus_info)
+	focus_sliders.clear()
 	for k in D.FOCUS_KEYS:
 		grid.add_child(_label(D.FOCUS_NAMES[k], 15, C_DIM))
-		grid.add_child(_slider_row(0, 10, design["focus"][k], func(v): design["focus"][k] = int(v); _update_design_info(), ""))
+		var row := HBoxContainer.new()
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var s := HSlider.new()
+		s.min_value = 0
+		s.max_value = D.FOCUS_BUDGET
+		s.step = 1
+		s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		s.focus_mode = Control.FOCUS_NONE
+		var l := _label("", 15)
+		l.custom_minimum_size.x = 70
+		row.add_child(s)
+		row.add_child(l)
+		grid.add_child(row)
+		focus_sliders[k] = [s, l]
+		s.value_changed.connect(_on_focus_slider.bind(k))
+	_refresh_focus_ui()
 
 	grid.add_child(_label("Evaluierung", 15, C_DIM))
 	grid.add_child(_slider_row(0, 60, design["eval_days"], func(v): design["eval_days"] = int(v); _update_design_info(), " Tage"))
@@ -366,6 +390,43 @@ func _update_design_info() -> void:
 	design_info.text = t
 	if design_error != null:
 		design_error.text = ""
+
+
+## Mehr Punkte für einen Bereich nehmen automatisch vom stärksten anderen Bereich
+func _on_focus_slider(v: float, k: String) -> void:
+	if focus_lock:
+		return
+	design["focus"][k] = int(v)
+	var over: int = lab.focus_spent(design["focus"]) - D.FOCUS_BUDGET
+	while over > 0:
+		var best := ""
+		var best_v := 0
+		for o in D.FOCUS_KEYS:
+			if o != k and int(design["focus"][o]) > best_v:
+				best = o
+				best_v = int(design["focus"][o])
+		if best == "":
+			break
+		design["focus"][best] = best_v - 1
+		over -= 1
+	_refresh_focus_ui()
+	_update_design_info()
+
+
+func _refresh_focus_ui() -> void:
+	focus_lock = true
+	for k in focus_sliders:
+		var pair: Array = focus_sliders[k]
+		pair[0].value = int(design["focus"][k])
+		pair[1].text = "%d" % int(design["focus"][k])
+	focus_lock = false
+	var free: int = D.FOCUS_BUDGET - lab.focus_spent(design["focus"])
+	if free == 0:
+		focus_info.text = "Alle %d Punkte verteilt" % D.FOCUS_BUDGET
+		focus_info.add_theme_color_override("font_color", C_GOOD)
+	else:
+		focus_info.text = "%d von %d Punkten frei – ungenutzte Punkte kosten Qualität" % [free, D.FOCUS_BUDGET]
+		focus_info.add_theme_color_override("font_color", C_WARN)
 
 
 func _on_start_training() -> void:

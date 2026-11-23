@@ -24,6 +24,7 @@ func _init() -> void:
 	test_datacenter()
 	test_chips()
 	test_audio_files()
+	test_focus_budget()
 	print("Tests: %d ok, %d fehlgeschlagen" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 
@@ -155,6 +156,23 @@ func test_audio_files() -> void:
 	for k in A.SFX:
 		var st: AudioStream = load(A.S + A.SFX[k][0] + ".ogg")
 		check(st != null and st.get_length() > 0.0, "Sound lädt: " + k)
+
+func test_focus_budget() -> void:
+	var lab := new_lab()
+	var all_max := {"help": 10, "code": 10, "creative": 10, "safety": 10}
+	check(lab.focus_spent(lab.clamp_focus(all_max)) == 10, "Alles auf 10 wird auf 10 Punkte gekürzt")
+	var d: Dictionary = lab.default_design()
+	d["focus"] = all_max
+	var balanced: Dictionary = d.duplicate(true)
+	balanced["focus"] = {"help": 3, "code": 2, "creative": 3, "safety": 2}
+	check(absf(lab.evaluate_design(d)["q"] - lab.evaluate_design(balanced)["q"]) < 0.01, "Überbuchung bringt keinen Vorteil")
+	var lazy: Dictionary = d.duplicate(true)
+	lazy["focus"] = {"help": 1, "code": 0, "creative": 0, "safety": 0}
+	check(lab.evaluate_design(lazy)["q"] < lab.evaluate_design(balanced)["q"], "Ungenutzte Punkte kosten Qualität")
+	var sc: Dictionary = lab.scale_focus({"help": 1, "code": 1, "creative": 1, "safety": 0})
+	check(lab.focus_spent(sc) == 10, "Skalieren ergibt genau 10")
+	lab.start_training(d)
+	check(lab.focus_spent(lab.training["design"]["focus"]) == 10, "Training speichert gekürzten Fokus")
 
 func test_bankrupt() -> void:
 	var lab := new_lab()

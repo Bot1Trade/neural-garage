@@ -6,7 +6,7 @@ const STEPS := [
 	{"title": "Willkommen", "tab": -1, "done": "next",
 		"text": "Es ist 2016, du sitzt mit deiner Mitgründung in einer Garage. Ihr wollt ein KI-Labor aufbauen – und irgendwann eine AGI, die der Menschheit hilft.\nDas Spiel ist pausiert, bis du loslegst."},
 	{"title": "Dein erstes Modell", "tab": 0, "done": "training",
-		"text": "Klick unten auf die Zielscheibe (leuchtet gelb): Dort entwirfst du KI-Modelle. Hake 'Web-Crawl' und 'Open-Source-Code' an, lass die Größe auf 100M und klicke 'Training starten'. Die Regler kannst du nach Gefühl setzen – was gefragt ist, lernst du später aus den Kritiken."},
+		"text": "Klick unten auf die Zielscheibe (leuchtet gelb): Dort entwirfst du KI-Modelle. Hake 'Web-Crawl' und 'Open-Source-Code' an, lass die Größe auf 100M und klicke 'Training starten'. Verteile die 10 Fokus-Punkte nach Gefühl – mehr Coding heißt weniger von etwas anderem. Was gefragt ist, verraten dir später die Kritiken."},
 	{"title": "Team aufbauen", "tab": 1, "done": "staff2",
 		"text": "Die Zeit läuft jetzt (oben rechts: Tempo, Leertaste = Pause). Allein dauert alles ewig: Stelle über das Team-Symbol eine weitere Person ein. Engineering beschleunigt das Training, Forschung bringt Qualität und Forschungspunkte."},
 	{"title": "Mehr Rechenleistung", "tab": 2, "done": "gpu4",

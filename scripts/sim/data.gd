@@ -64,6 +64,8 @@ const CHIP_PRICE := 0.6              # Preis relativ zur Markt-GPU (mit Fabrik: 
 const FAB_COST := 1500000000.0
 
 const FOCUS_KEYS := ["help", "code", "creative", "safety"]
+## Fokus-Punkte pro Modell. Mehr in einen Bereich = weniger in die anderen. Ungenutzte Punkte kosten Qualität.
+const FOCUS_BUDGET := 10
 const FOCUS_NAMES := {"help": "Hilfsbereitschaft", "code": "Coding", "creative": "Kreativität", "safety": "Sicherheit"}
 
 ## Was der Markt gerade will. Der Spieler sieht nur Name + Hinweis und lernt den Rest aus den Kritiken.
