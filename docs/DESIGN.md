@@ -181,3 +181,11 @@ Kaffeebar (+10 % Forschung) · Konferenzräume (+Qualität) · Fitness & Ruherau
 - **Finanzen (Taste F):** Kassenbuch mit Kategorien, Kontoverlauf 2 Jahre, letzte 30 Tage nach Kategorie, laufende Kosten pro Tag, Jahresbilanz.
 - **Berater (Taste B):** bis zu 7 Tipps nach Wichtigkeit mit Sprung in den passenden Bereich; dringende Warnungen zusätzlich als Meldung.
 - **Balance (30 Bot-Runs):** 22 sichere AGI, 7 Pleiten, 1× Helix zuerst.
+
+## 17. UI-Überarbeitung (24.11.2026)
+
+- Obere Leiste: kleine Bezeichnung unter jeder Zahl (Geld · pro Tag, Rechenleistung, Ruf, Forschungspunkte, Risiko, deine Anteile).
+- Werkzeugleiste: Symbol + Beschriftung, Gruppen (Labor | Geschäft | Überblick | Welt).
+- „Neues Spiel“ fragt nach.
+- Team: Rollen-Übersicht, Bewerbungen oben, Entlassen nur als kleines ×, lange Namen gekürzt.
+- Compute heißt „GPUs mieten“; Produkte als Tabelle (Modell · Status · Bewertung farbig · Umsatz · Risiko · Aktion); Training zeigt alle Modell-Details.

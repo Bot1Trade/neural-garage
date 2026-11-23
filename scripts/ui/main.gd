@@ -277,7 +277,24 @@ func _build_model_tab() -> void:
 		train_bar = ProgressBar.new()
 		train_bar.custom_minimum_size.y = 28
 		tab_model.add_child(train_bar)
-		tab_model.add_child(_wrap("Mehr GPUs oder Engineers beschleunigen das Training. Neue GPUs zählen sofort. Während des Trainings kannst du forschen, einstellen und umziehen.", C_DIM))
+		var dz: Dictionary = tr["design"]
+		var parts := []
+		for k in D.FOCUS_KEYS:
+			parts.append("%s %d" % [D.FOCUS_NAMES[k], int(dz["focus"][k])])
+		var datas := []
+		for did in dz["data"]:
+			datas.append(D.DATA[did]["name"])
+		var info := GridContainer.new()
+		info.columns = 2
+		info.add_theme_constant_override("h_separation", 16)
+		info.add_theme_constant_override("v_separation", 6)
+		for pair in [["Architektur", lab.tech(dz["arch"])["name"]], ["Größe", _size_name(D.SIZES[int(dz["size_index"])]) + " Parameter"],
+				["Daten", ", ".join(datas)], ["Fokus", " · ".join(parts)], ["Evaluierung", "%d Tage" % int(dz["eval_days"])],
+				["Leistung", "%.2f× des heutigen Marktniveaus" % (float(tr["q"]) / lab.expected_quality())]]:
+			info.add_child(_label(pair[0], 14, C_DIM))
+			info.add_child(_wrap(pair[1], C_TEXT))
+		tab_model.add_child(info)
+		tab_model.add_child(_wrap("Mehr GPUs oder Engineers beschleunigen das Training – neue GPUs zählen sofort. Währenddessen kannst du forschen, einstellen und ausbauen.", C_DIM))
 		return
 	if design_model_id != lab.next_model_id or not lab.techs.has(design["arch"]):
 		var old_focus: Dictionary = design.get("focus", {})
@@ -461,29 +478,52 @@ func _on_start_training() -> void:
 func _build_team() -> void:
 	_clear(tab_team)
 	var o: Dictionary = lab.office_data()
-	tab_team.add_child(_label("%s  ·  %d/%d Personen  ·  %d/%d GPUs" % [o["name"], lab.staff.size(), o["staff"], lab.gpu_count(), o["gpus"]], 20, C_ACCENT))
-	if lab.office < D.OFFICES.size() - 1:
-		var n: Dictionary = D.OFFICES[lab.office + 1]
-		var b := _button("Umzug: %s für %s  (%d Personen, %d GPUs)" % [n["name"], lab.fmt_money(n["cost"]), n["staff"], n["gpus"]], func(): _show_error(lab.upgrade_office()))
-		b.disabled = lab.money < float(n["cost"])
-		tab_team.add_child(b)
-	tab_team.add_child(_wrap("Wirkung: Modellqualität ×%.2f · Training ×%.2f · Risiko −%d %% · Umsatz ×%.2f · %.2f Forschung/Tag · Gehälter %s/Tag" % [
+	var full: bool = lab.staff.size() >= int(o["staff"])
+	tab_team.add_child(_label("%s  ·  %d/%d Plätze belegt" % [o["name"], lab.staff.size(), o["staff"]], 20, C_WARN if full else C_ACCENT))
+	# Rollen-Übersicht
+	var roles := HFlowContainer.new()
+	roles.add_theme_constant_override("h_separation", 18)
+	for r in D.ROLE_ORDER:
+		var n := 0
+		for p in lab.staff:
+			if p["role"] == r:
+				n += 1
+		var rl := _label("%s: %d" % [D.ROLES[r]["name"], n], 15, D.ROLES[r]["color"])
+		rl.tooltip_text = D.ROLES[r]["desc"]
+		rl.mouse_filter = Control.MOUSE_FILTER_STOP
+		roles.add_child(rl)
+	tab_team.add_child(roles)
+	tab_team.add_child(_wrap("Wirkung: Qualität ×%.2f · Training ×%.2f · Risiko −%d %% · Umsatz ×%.2f · %.1f FP/Tag · Gehälter %s/Tag" % [
 		lab.team_quality(), lab.engineer_mult(), int(lab.safety_reduction() * 100), lab.sales_mult(), lab.rp_per_day(), lab.fmt_money(lab.daily_salaries())], C_DIM))
-	tab_team.add_child(_label("Team", 18))
-	for i in range(lab.staff.size()):
-		var p: Dictionary = lab.staff[i]
-		var row := _person_row(p)
-		if i > 0:
-			row.add_child(_button("Entlassen", func(): lab.fire(i), "Abfindung: ein Monatsgehalt"))
-		tab_team.add_child(row)
+	if full and lab.office < D.OFFICES.size() - 1:
+		var n2: Dictionary = D.OFFICES[lab.office + 1]
+		tab_team.add_child(_label("Büro voll – für mehr Leute umziehen: %s für %s (Haus-Symbol)" % [n2["name"], lab.fmt_money(n2["cost"])], 14, C_WARN))
+	# Bewerbungen zuerst
 	tab_team.add_child(HSeparator.new())
-	tab_team.add_child(_label("Bewerbungen  (jeden Monat neu – bessere Leute bei höherer Reputation)", 18))
+	tab_team.add_child(_label("Bewerbungen", 18))
+	tab_team.add_child(_label("Jeden Monat neu – bei höherem Ruf bessere Leute.", 13, C_DIM))
 	for i in range(lab.candidates.size()):
 		var c: Dictionary = lab.candidates[i]
 		var row := _person_row(c)
 		var b := _button("Einstellen", func(): _show_error(lab.hire(i)), "Einstellungsbonus: %s" % lab.fmt_money(float(c["salary"]) * 0.1))
-		b.disabled = lab.staff.size() >= int(o["staff"])
+		b.disabled = full
 		row.add_child(b)
+		tab_team.add_child(row)
+	# Team
+	tab_team.add_child(HSeparator.new())
+	tab_team.add_child(_label("Dein Team (%d)" % lab.staff.size(), 18))
+	for i in range(lab.staff.size()):
+		var p: Dictionary = lab.staff[i]
+		var row := _person_row(p)
+		if i > 0:
+			var x := _icon_button("icons/cross", func(): lab.fire(i), "Entlassen – Abfindung: %s" % lab.fmt_money(float(p["salary"]) / 12.0), 26)
+			x.modulate = Color(1, 1, 1, 0.45)
+			x.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			row.add_child(x)
+		else:
+			var sp := Control.new()
+			sp.custom_minimum_size.x = 26
+			row.add_child(sp)
 		tab_team.add_child(row)
 
 
@@ -492,23 +532,33 @@ func _person_row(p: Dictionary) -> HBoxContainer:
 	row.add_theme_constant_override("separation", 12)
 	var role: Dictionary = D.ROLES[p["role"]]
 	var rl := _label(role["name"], 15, role["color"])
-	rl.custom_minimum_size.x = 110
+	rl.custom_minimum_size.x = 96
 	rl.tooltip_text = role["desc"]
 	rl.mouse_filter = Control.MOUSE_FILTER_STOP
 	row.add_child(rl)
 	var nl := _label(p["name"], 15)
 	nl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	nl.clip_text = true
+	nl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	nl.custom_minimum_size.x = 60
+	nl.tooltip_text = p["name"]
+	nl.mouse_filter = Control.MOUSE_FILTER_STOP
 	row.add_child(nl)
 	var sk := ProgressBar.new()
 	sk.max_value = 10
 	sk.value = int(p["skill"])
 	sk.show_percentage = false
-	sk.custom_minimum_size = Vector2(90, 12)
+	sk.custom_minimum_size = Vector2(64, 12)
 	sk.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	sk.tooltip_text = "Können %d/10" % int(p["skill"])
 	row.add_child(sk)
-	var sl := _label("%s/Jahr" % lab.fmt_money(p["salary"]), 15, C_DIM)
-	sl.custom_minimum_size.x = 110
+	var lv := _label("%d" % int(p["skill"]), 13, C_DIM)
+	lv.custom_minimum_size.x = 18
+	row.add_child(lv)
+	var sl := _label("%s/J." % lab.fmt_money(p["salary"]), 15, C_DIM)
+	sl.custom_minimum_size.x = 84
+	sl.tooltip_text = "Jahresgehalt"
+	sl.mouse_filter = Control.MOUSE_FILTER_STOP
 	row.add_child(sl)
 	return row
 
@@ -517,7 +567,7 @@ func _build_compute() -> void:
 	_clear(tab_compute)
 	var gen: int = lab.gpu_gen_now()
 	var cap: int = lab.office_data()["gpus"]
-	tab_compute.add_child(_label("Rechenzentrum", 22, C_ACCENT))
+	tab_compute.add_child(_label("GPUs mieten", 22, C_ACCENT))
 	tab_compute.add_child(_label("Leistung %.0f  ·  Miete %s/Tag  ·  Belegung %d/%d" % [lab.compute_power(), lab.fmt_money(lab.daily_gpu_cost()), lab.gpu_count(), cap], 16))
 	tab_compute.add_child(_label("Aktuell im Handel: GPU Gen %d  –  Leistung %.0f, Miete %s/Tag pro Stück" % [gen, lab.gpu_power(gen), lab.fmt_money(lab.gpu_cost(gen))], 16))
 	if lab.gpu_price_mult > 1.0:
@@ -545,7 +595,7 @@ func _build_compute() -> void:
 	if not lab.datacenters.is_empty():
 		tab_compute.add_child(_label("Eigene Rechenzentren: Leistung %.0f, Kosten %s/Tag  (verwalten im Tab 'Ausbau')" % [lab.dc_total_power(), lab.fmt_money(lab.daily_dc_cost())], 15, C_ACCENT))
 	else:
-		tab_compute.add_child(_wrap("Ab 2018 kannst du im Tab 'Ausbau' eigene Rechenzentren bauen und Hardware kaufen statt mieten.", C_DIM))
+		tab_compute.add_child(_wrap("Ab 2018 kannst du unter „Ausbau“ (Haus-Symbol) oder in der Weltansicht Grundstücke kaufen, eigene Rechenzentren bauen und Hardware kaufen statt mieten.", C_DIM))
 
 
 func _build_research() -> void:
@@ -588,10 +638,16 @@ func _build_products() -> void:
 	tab_products.add_child(_label(risk_text, 15, C_DIM))
 	tab_products.add_child(_label("API-Umsatz gesamt: %s/Tag  ·  Helix-Bestwert: Qualität %.0f" % [lab.fmt_money(lab.api_revenue()), lab.rival["best_q"]], 15, C_DIM))
 	if lab.models.is_empty():
-		tab_products.add_child(_label("Noch keine Modelle. Entwirf dein erstes im Tab 'Modell'.", 15, C_DIM))
+		tab_products.add_child(_label("Noch keine Modelle. Entwirf dein erstes über die Zielscheibe (Modell).", 15, C_DIM))
 	var status_names := {"ready": "bereit", "paper": "Paper", "api": "API", "open": "Open Weights", "withdrawn": "zurückgezogen"}
 	var withdrawn_shown := 0
 	var withdrawn_hidden := 0
+	var grid := GridContainer.new()
+	grid.columns = 6
+	grid.add_theme_constant_override("h_separation", 14)
+	grid.add_theme_constant_override("v_separation", 8)
+	for hd in ["Modell", "Status", "Bewertung", "Umsatz/Tag", "Risiko", ""]:
+		grid.add_child(_label(hd, 13, C_DIM))
 	for i in range(lab.models.size() - 1, -1, -1):
 		var m: Dictionary = lab.models[i]
 		if m["status"] == "withdrawn":
@@ -599,30 +655,36 @@ func _build_products() -> void:
 			if withdrawn_shown > 3:
 				withdrawn_hidden += 1
 				continue
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 12)
-		var name_l := _label("%s  ·  %s %s" % [m["name"], lab.tech(m["arch"])["name"], _size_name(D.SIZES[int(m["size_index"])])], 15)
-		name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(name_l)
-		row.add_child(_label(status_names.get(m["status"], m["status"]), 15, C_ACCENT))
-		if float(m["rating"]) > 0.0:
-			row.add_child(_label("%.1f/10" % m["rating"], 15))
+		var active: bool = m["status"] in ["ready", "api", "open"]
+		var nv := VBoxContainer.new()
+		nv.add_theme_constant_override("separation", -4)
+		nv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		nv.add_child(_label(m["name"], 15, C_TEXT if active else C_DIM))
+		nv.add_child(_label("%s · %s" % [lab.tech(m["arch"])["name"], _size_name(D.SIZES[int(m["size_index"])])], 12, C_DIM))
+		grid.add_child(nv)
+		grid.add_child(_label(status_names.get(m["status"], m["status"]), 15, C_ACCENT if active else C_DIM))
+		var r := float(m["rating"])
+		grid.add_child(_label(("%.1f" % r) if r > 0.0 else "–", 15, C_GOOD if r >= 7.0 else (C_WARN if r >= 4.0 else (C_BAD if r > 0.0 else C_DIM))))
+		var rev := _label("–", 15, C_DIM)
+		if m["status"] == "api":
+			rev.add_theme_color_override("font_color", C_GOOD)
+			product_labels.append({"label": rev, "id": int(m["id"])})
+		grid.add_child(rev)
 		if lab.can_see_risk():
-			row.add_child(_label("Risiko %.2f" % m["risk"], 15, C_BAD if float(m["risk"]) >= 1.0 else C_DIM))
+			grid.add_child(_label("%.2f" % m["risk"], 15, C_BAD if float(m["risk"]) >= 1.0 else C_DIM))
+		else:
+			grid.add_child(_label("?", 15, C_DIM))
+		var act := HBoxContainer.new()
+		var id: int = int(m["id"])
 		match m["status"]:
 			"ready":
-				var id: int = int(m["id"])
-				row.add_child(_button("Paper", func(): _release(id, "paper")))
-				row.add_child(_button("API", func(): _release(id, "api")))
-				row.add_child(_button("Open", func(): _release(id, "open")))
+				act.add_child(_button("Paper", func(): _release(id, "paper"), "Ruf + Forschungszuschuss, kein Umsatz"))
+				act.add_child(_button("API", func(): _release(id, "api"), "Täglicher Umsatz"))
+				act.add_child(_button("Open", func(): _release(id, "open"), "Viel Ruf und FP, doppeltes Risiko"))
 			"api":
-				var rl := _label("", 15, C_GOOD)
-				rl.custom_minimum_size.x = 110
-				row.add_child(rl)
-				product_labels.append({"label": rl, "id": int(m["id"])})
-				var id: int = int(m["id"])
-				row.add_child(_button("Zurückziehen", func(): lab.withdraw_model(id), "Kein Umsatz mehr, aber auch kein Risiko mehr."))
-		tab_products.add_child(row)
+				act.add_child(_button("Zurückziehen", func(): lab.withdraw_model(id), "Kein Umsatz mehr, aber auch kein Risiko mehr."))
+		grid.add_child(act)
+	tab_products.add_child(grid)
 	if withdrawn_hidden > 0:
 		tab_products.add_child(_label("+ %d ältere zurückgezogene Modelle" % withdrawn_hidden, 14, C_DIM))
 
@@ -1021,7 +1083,15 @@ func _available_data() -> Array:
 
 # ================================================================ Popups
 
+func _confirm_new_game() -> void:
+	modal_event = "confirm_new"
+	_show_modal("Neues Spiel starten?", "Der aktuelle Fortschritt geht verloren, wenn du nicht gespeichert hast.",
+		[{"label": "Ja, neues Spiel", "tip": ""}, {"label": "Abbrechen", "tip": ""}])
+
+
 func _check_modal() -> void:
+	if modal_event is String and modal_event == "confirm_new":
+		return
 	if not lab.ending.is_empty():
 		if not (modal_event is String and modal_event == "ending"):
 			modal_event = "ending"
@@ -1064,6 +1134,12 @@ func _on_modal_choice(i: int) -> void:
 	audio.play("click")
 	if modal_event is String and modal_event == "ending":
 		_new_game()
+		return
+	if modal_event is String and modal_event == "confirm_new":
+		modal_event = null
+		modal.visible = false
+		if i == 0:
+			_new_game()
 		return
 	lab.resolve_event(i)
 	modal_event = null
@@ -1201,11 +1277,15 @@ func _build_ui() -> void:
 	bar.add_child(bh)
 	for i in range(TOOLS.size()):
 		var t: Dictionary = TOOLS[i]
-		var b := _icon_button(t["icon"], _open_tab.bind(i), t["tip"], 58)
+		var b := _tool_button(t["icon"], {7: "News"}.get(i, t["title"]), t["tip"])
+		b.pressed.connect(_open_tab.bind(i))
 		tool_btns.append(b)
 		bh.add_child(b)
+		if i in [3, 5, 7]:
+			bh.add_child(VSeparator.new())   # Gruppen: Labor | Geschäft | Überblick
 	bh.add_child(VSeparator.new())
-	view_btn = _icon_button("icons/zoomOut", _toggle_world, "Weltansicht: Labor, Rechenzentren, Konkurrenz (Tab)", 58)
+	view_btn = _tool_button("icons/zoomOut", "Welt", "Weltansicht: Labor, Grundstücke, Konkurrenz (Tab)")
+	view_btn.pressed.connect(_toggle_world)
 	bh.add_child(view_btn)
 
 	# Tutorial über der Werkzeugleiste
@@ -1247,12 +1327,12 @@ func _build_topbar() -> Control:
 	dv.add_child(top["era"])
 	h.add_child(dv)
 	var chips := [
-		["money", "emotes/emote_cash", "Geld und Tagesbilanz (Umsatz − Gehälter − Hardware)"],
-		["compute", "icons/signal3", "Rechenleistung (gemietet + eigene Rechenzentren)"],
-		["rep", "emotes/emote_star", "Ruf (0–100): lockt Investoren, Talente und Kundschaft an"],
-		["rp", "emotes/emote_idea", "Forschungspunkte"],
-		["risk", "emotes/emote_alert", "Risiko deiner veröffentlichten Modelle (nur mit Safety-Team sichtbar)"],
-		["equity", "icons/leaderboardsSimple", "Deine Firmenanteile"],
+		["money", "emotes/emote_cash", "Geld und Tagesbilanz (Umsatz − Gehälter − Hardware)", "Geld · pro Tag"],
+		["compute", "icons/signal3", "Rechenleistung (gemietet + eigene Rechenzentren)", "Rechenleistung"],
+		["rep", "emotes/emote_star", "Ruf (0–100): lockt Investoren, Talente und Kundschaft an", "Ruf"],
+		["rp", "emotes/emote_idea", "Forschungspunkte", "Forschungspunkte"],
+		["risk", "emotes/emote_alert", "Risiko deiner veröffentlichten Modelle (nur mit Safety-Team sichtbar)", "Risiko"],
+		["equity", "icons/leaderboardsSimple", "Deine Firmenanteile", "deine Anteile"],
 	]
 	for c in chips:
 		var ch := HBoxContainer.new()
@@ -1262,10 +1342,17 @@ func _build_topbar() -> Control:
 		var ic := _icon_rect(c[1], 28)
 		ic.mouse_filter = Control.MOUSE_FILTER_PASS
 		ch.add_child(ic)
+		var vb := VBoxContainer.new()
+		vb.add_theme_constant_override("separation", -5)
+		vb.mouse_filter = Control.MOUSE_FILTER_PASS
 		var l := _label("", 17)
 		l.mouse_filter = Control.MOUSE_FILTER_PASS
 		top[c[0]] = l
-		ch.add_child(l)
+		vb.add_child(l)
+		var cap := _label(c[3], 11, C_DIM)
+		cap.mouse_filter = Control.MOUSE_FILTER_PASS
+		vb.add_child(cap)
+		ch.add_child(vb)
 		h.add_child(ch)
 	var sp := Control.new()
 	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1285,7 +1372,7 @@ func _build_topbar() -> Control:
 	h.add_child(_icon_button("icons/save", _save.bind(false), "Speichern", 38))
 	h.add_child(_icon_button("icons/import", _load, "Laden", 38))
 	h.add_child(_icon_button("icons/information", func(): lab.flags["tut"] = 0, "Tutorial neu starten", 38))
-	h.add_child(_icon_button("icons/return", _new_game, "Neues Spiel (ohne Nachfrage!)", 38))
+	h.add_child(_icon_button("icons/return", _confirm_new_game, "Neues Spiel", 38))
 	return p
 
 
@@ -1427,6 +1514,7 @@ func highlight_tool(idx: int) -> void:
 func _toggle_world() -> void:
 	office_view.set_mode("office" if office_view.mode == "world" else "world")
 	view_btn.icon = _tex("icons/zoomIn" if office_view.mode == "world" else "icons/zoomOut")
+	view_btn.text = "Büro" if office_view.mode == "world" else "Welt"
 	view_btn.tooltip_text = "Zurück ins Büro (Tab)" if office_view.mode == "world" else "Weltansicht: Labor, Rechenzentren, Konkurrenz (Tab)"
 
 
@@ -1456,6 +1544,24 @@ func _toast(text: String) -> void:
 
 func _tex(path: String) -> Texture2D:
 	return load("res://assets/kenney/%s.png" % path)
+
+
+## Werkzeug-Knopf: Symbol oben, kurze Beschriftung darunter
+func _tool_button(icon: String, caption: String, tip: String) -> Button:
+	var b := Button.new()
+	b.icon = _tex(icon)
+	b.text = caption
+	b.expand_icon = true
+	b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+	b.add_theme_font_size_override("font_size", 12)
+	b.custom_minimum_size = Vector2(70, 66)
+	b.tooltip_text = tip
+	b.focus_mode = Control.FOCUS_NONE
+	b.mouse_entered.connect(func(): b.scale = Vector2(1.06, 1.06))
+	b.mouse_exited.connect(func(): b.scale = Vector2.ONE)
+	b.resized.connect(func(): b.pivot_offset = b.size / 2.0)
+	return b
 
 
 func _icon_rect(path: String, px: int) -> TextureRect:
