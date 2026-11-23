@@ -15,7 +15,7 @@ KI-Labor-Tycoon in Godot 4.7 (GDScript). Design: `docs/DESIGN.md` (zuerst lesen,
 - Tests: `"$G" --headless --path . -s tests/run_tests.gd` → muss „0 fehlgeschlagen“ zeigen
 - Balance: `"$G" --headless --path . -s tests/balance.gd -- 30 v` → Enden + Median-Jahr je Ziel
 - Smoke: `"$G" --headless --path . --quit-after 300` → keine `SCRIPT ERROR`
-- Screenshot: `"$G" --path . -- --shot=<scratchpad>/x.png --days=1500 --tab=0 [--modal] [--tut=N] [--office]` (Seitenleiste: 0 Modell, 1 Team, 2 Compute, 3 Forschung, 4 Produkte, 5 Ausbau, 6 Ziele, 7 News; ohne --tab bleibt sie zu; `--world` = Weltansicht; `--scroll=N` scrollt; `--office` = nur 3D-Büro groß), danach PNG ansehen
+- Screenshot: `"$G" --path . -- --shot=<scratchpad>/x.png --days=1500 --tab=0 [--modal] [--tut=N] [--office]` (Seitenleiste: 0 Modell, 1 Team, 2 Compute, 3 Forschung, 4 Produkte, 5 Ausbau, 6 Ziele, 7 News; ohne --tab bleibt sie zu; `--world` = Weltansicht; `--scroll=N` scrollt; `--wait=S` wartet S Sekunden vor dem Bild (Animationen); `--office` = nur 3D-Büro groß), danach PNG ansehen
 - Modellgrößen/Animationen: `"$G" --headless --path . -s tools/inspect_models.gd`
 - Spielen: `spielen.cmd`
 

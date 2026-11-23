@@ -17,3 +17,5 @@ Danke an Kenney – Nennung nicht verpflichtend, aber verdient.
 | Musik „Lofi Hip Hop Loop“ (`assets/music/lofi_loop.ogg`) | https://opengameart.org/content/lofi-hip-hop-loop | omfgdude | CC0 1.0 |
 | Musik „Chill lofi inspired“ (`assets/music/chill_lofi.ogg`) | https://opengameart.org/content/chill-lofi-inspired | omfgdude | CC0 1.0 |
 | Musik „Electronic Music Loop“ (`assets/music/electronic_loop.ogg`) | https://opengameart.org/content/electronic-music-loop | Rami99 | CC0 1.0 |
+| Nature Kit (12 Bäume/Pflanzen in `assets/kenney/nature/`) | https://kenney.nl/assets/nature-kit | Kenney | CC0 1.0 |
+| Car Kit (8 Autos in `assets/kenney/cars/`) | https://kenney.nl/assets/car-kit | Kenney | CC0 1.0 |

@@ -1329,6 +1329,7 @@ func _screenshot_mode(args: PackedStringArray) -> void:
 	var office_only := false
 	var tut := -1
 	var scroll := 0
+	var wait := 0.0
 	for a in args:
 		if a.begins_with("--shot="):
 			path = a.substr(7)
@@ -1342,6 +1343,8 @@ func _screenshot_mode(args: PackedStringArray) -> void:
 			tut = int(a.substr(6))
 		elif a.begins_with("--scroll="):
 			scroll = int(a.substr(9))
+		elif a.begins_with("--wait="):
+			wait = float(a.substr(7))
 		elif a == "--world":
 			world = true
 		elif a == "--office":
@@ -1374,6 +1377,8 @@ func _screenshot_mode(args: PackedStringArray) -> void:
 		modal.visible = false
 	for i in range(4):
 		await get_tree().process_frame
+	if wait > 0.0:
+		await get_tree().create_timer(wait).timeout
 	if office_only:
 		office_view.stretch = false
 		office_view.viewport.size = Vector2i(1200, 900)

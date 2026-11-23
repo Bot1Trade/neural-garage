@@ -145,3 +145,10 @@ Kaffeebar (+10 % Forschung) · Konferenzräume (+Qualität) · Fitness & Ruherau
 - **Musik:** Playlist aus 3 CC0-Stücken (Lofi, Chill-Lofi, Elektro), läuft nacheinander mit Einblendung. Startet bei einem zufälligen Stück.
 - **Effekte** (Kenney, CC0): Klick, Seitenleiste auf/zu, Bestätigung/Fehler bei Aktionen, Tempo-Wechsel, Ereignis-Popup, Training-Start, Einstellung (Herz), Forschung (Power-up), Bau (Power-up), Vorfall (tiefer Ton), Geld (leiser Ton alle ~6 s bei Gewinn), Release- und Ziel-Jingles, Sieg-/Niederlage-Jingle.
 - **Lautstärke:** Noten-Symbol oben rechts → zwei Regler (Musik, Effekte). Gespeichert in `user://settings.json`, getrennt vom Spielstand. Eigene Audio-Busse „Music“ und „SFX“.
+
+## 12. Grafik-Update (23.11.2026)
+
+- Renderer: Forward+ (Vulkan) mit automatischem Rückfall auf OpenGL. Himmel-Verlauf, SSAO, Glow, AgX-Tonemapping, weichere Schatten.
+- Büro: steht auf einem Gelände (Garage = Einfahrt mit Auto, Tech-Tower = Dachterrasse, sonst Rasen mit Bäumen hinter den Wänden und Blumen davor). Boden im Schachbrett, warme Raumlichter, leuchtende Monitore.
+- Leben: Mit Kaffeebar holen sich Leute regelmäßig Kaffee (laufen über den Gang und zurück).
+- Welt: ~60 Bäume und Pflanzen, 12 Autos fahren rechts auf den Straßen.
