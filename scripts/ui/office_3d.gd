@@ -179,6 +179,35 @@ func set_mode(m: String) -> void:
 # Mausrad = Zoom zum Mauszeiger · links/mitte ziehen = verschieben (Welt klebt am Zeiger)
 # rechts ziehen = drehen · WASD/Pfeile = verschieben · Q/E = 45° drehen · R = zurücksetzen
 
+## Läuft ein Zieh-Vorgang, gehören Bewegung und Loslassen der Kamera – auch über Leisten und Panels.
+func _input(ev: InputEvent) -> void:
+	if not (drag_pan or drag_rot):
+		return
+	if ev is InputEventMouseMotion:
+		_drag_motion(ev as InputEventMouseMotion)
+		get_viewport().set_input_as_handled()
+	elif ev is InputEventMouseButton and not ev.pressed:
+		var mb := ev as InputEventMouseButton
+		if mb.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_MIDDLE] and drag_pan:
+			if mb.button_index == MOUSE_BUTTON_LEFT and not drag_moved:
+				clicked_ground.emit(_ground_at(mb.position))
+			drag_pan = false
+			get_viewport().set_input_as_handled()
+		elif mb.button_index == MOUSE_BUTTON_RIGHT and drag_rot:
+			drag_rot = false
+			get_viewport().set_input_as_handled()
+
+
+func _drag_motion(mm: InputEventMouseMotion) -> void:
+	if drag_rot:
+		yaw_t -= mm.relative.x * 0.3
+	elif drag_pan:
+		if mm.position.distance_to(press_pos) > 5.0:
+			drag_moved = true
+		if drag_moved:
+			_pan_pixels(mm.relative)
+
+
 func _unhandled_input(ev: InputEvent) -> void:
 	if not is_visible_in_tree():
 		return
@@ -259,7 +288,7 @@ func _zoom_at(factor: float, screen_pos: Vector2) -> void:
 
 
 func _clamp_pan() -> void:
-	var lim := cam_base_size * 0.9
+	var lim := cam_base_size * 1.5
 	pan_t = Vector3(clampf(pan_t.x, -lim, lim), 0, clampf(pan_t.z, -lim, lim))
 
 
@@ -274,6 +303,12 @@ func _ground_at(screen_pos: Vector2) -> Vector3:
 
 
 func _smooth_camera(delta: float) -> void:
+	# Sicherung: Taste wurde losgelassen, ohne dass wir es mitbekommen haben (z. B. außerhalb des Fensters)
+	if DisplayServer.get_name() != "headless":
+		if drag_pan and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and not Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
+			drag_pan = false
+		if drag_rot and not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+			drag_rot = false
 	var k := 1.0 - exp(-12.0 * delta)
 	var moved := false
 	var kb := Vector3.ZERO
