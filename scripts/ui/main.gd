@@ -275,8 +275,7 @@ func _refresh() -> void:
 	for pl in product_labels:
 		var m: Dictionary = lab.get_model(pl["id"])
 		if not m.is_empty() and m["status"] == "api":
-			pl["label"].text = "%s Nutzer (%.1f %%)
-%s/Tag" % [_short(float(m.get("users", 0.0))), lab.popularity(m), lab.fmt_money(lab.model_revenue(m))]
+			pl["label"].text = "%s Nutzer · Marktanteil %.1f %% · %s/Tag" % [_short(float(m.get("users", 0.0))), lab.popularity(m), lab.fmt_money(lab.model_revenue(m))]
 
 
 # ================================================================ Tabs
@@ -853,12 +852,6 @@ func _build_products() -> void:
 	var status_names := {"ready": "bereit", "paper": "Paper", "api": "API", "open": "Open Weights", "withdrawn": "zurückgezogen"}
 	var withdrawn_shown := 0
 	var withdrawn_hidden := 0
-	var grid := GridContainer.new()
-	grid.columns = 6
-	grid.add_theme_constant_override("h_separation", 14)
-	grid.add_theme_constant_override("v_separation", 8)
-	for hd in ["Modell", "Status", "Bewertung", "Nutzer · Umsatz", "Risiko", ""]:
-		grid.add_child(_label(hd, 13, C_DIM))
 	for i in range(lab.models.size() - 1, -1, -1):
 		var m: Dictionary = lab.models[i]
 		if m["status"] == "withdrawn":
@@ -866,45 +859,67 @@ func _build_products() -> void:
 			if withdrawn_shown > 3:
 				withdrawn_hidden += 1
 				continue
-		var active: bool = m["status"] in ["ready", "api", "open"]
-		var nv := VBoxContainer.new()
-		nv.add_theme_constant_override("separation", -4)
-		nv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		nv.add_child(_label(m["name"], 15, C_TEXT if active else C_DIM))
-		nv.add_child(_label("%s · %s" % [lab.tech(m["arch"])["name"], _size_name(D.SIZES[int(m["size_index"])])], 12, C_DIM))
-		grid.add_child(nv)
-		grid.add_child(_label(status_names.get(m["status"], m["status"]), 15, C_ACCENT if active else C_DIM))
-		var r := float(m["rating"])
-		grid.add_child(_label(("%.1f" % r) if r > 0.0 else "–", 15, C_GOOD if r >= 7.0 else (C_WARN if r >= 4.0 else (C_BAD if r > 0.0 else C_DIM))))
-		var rev := _label("–", 15, C_DIM)
-		if m["status"] == "api":
-			rev.add_theme_color_override("font_color", C_GOOD)
-			product_labels.append({"label": rev, "id": int(m["id"])})
-		grid.add_child(rev)
-		if lab.can_see_risk():
-			grid.add_child(_label("%.2f" % m["risk"], 15, C_BAD if float(m["risk"]) >= 1.0 else C_DIM))
-		else:
-			grid.add_child(_label("?", 15, C_DIM))
-		var act := HBoxContainer.new()
-		var id: int = int(m["id"])
-		match m["status"]:
-			"ready":
-				act.add_child(_button("Paper", func(): _release(id, "paper"), "Ruf + Forschungszuschuss, kein Umsatz"))
-				act.add_child(_button("API", func(): _release(id, "api"), "Täglicher Umsatz"))
-				act.add_child(_button("Open", func(): _release(id, "open"), "Viel Ruf und FP, doppeltes Risiko"))
-			"api":
-				if int(m.get("ad_until", 0)) > lab.day:
-					act.add_child(_label("Werbung %d T." % (int(m["ad_until"]) - lab.day), 13, C_WARN))
-				else:
-					for ad in D.ADS:
-						var adid: String = ad["id"]
-						act.add_child(_button("Werbung" if adid == "online" else "Kampagne", func(): _show_error(lab.start_campaign(id, adid)),
-							"%s: %s – +%d %% Nutzer-Potenzial für %d Tage" % [ad["name"], lab.fmt_money(lab.ad_cost(adid)), int(float(ad["boost"]) * 100), ad["days"]]))
-				act.add_child(_button("×", func(): lab.withdraw_model(id), "Zurückziehen: kein Umsatz mehr, aber auch kein Risiko mehr."))
-		grid.add_child(act)
-	tab_products.add_child(grid)
+		tab_products.add_child(_model_card(m, status_names))
 	if withdrawn_hidden > 0:
 		tab_products.add_child(_label("+ %d ältere zurückgezogene Modelle" % withdrawn_hidden, 14, C_DIM))
+
+
+## Karte für ein Modell: Kopfzeile, Kennzahlen, Aktionen (brechen um, passt immer in die Leiste)
+func _model_card(m: Dictionary, status_names: Dictionary) -> PanelContainer:
+	var active: bool = m["status"] in ["ready", "api", "open"]
+	var p := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color("15181e")
+	sb.border_color = C_ACCENT.darkened(0.3) if m["status"] == "api" else (C_WARN if m["status"] == "ready" else C_PANEL2)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(6)
+	sb.set_content_margin_all(8)
+	p.add_theme_stylebox_override("panel", sb)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 4)
+	p.add_child(v)
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 10)
+	var nl := _label(m["name"], 16, C_TEXT if active else C_DIM)
+	nl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	nl.clip_text = true
+	nl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	h.add_child(nl)
+	h.add_child(_label(status_names.get(m["status"], m["status"]), 14, C_ACCENT if active else C_DIM))
+	var r := float(m["rating"])
+	h.add_child(_label(("%.1f/10" % r) if r > 0.0 else "–", 15, C_GOOD if r >= 7.0 else (C_WARN if r >= 4.0 else (C_BAD if r > 0.0 else C_DIM))))
+	v.add_child(h)
+	var facts := "%s · %s" % [lab.tech(m["arch"])["name"], _size_name(D.SIZES[int(m["size_index"])])]
+	if lab.can_see_risk():
+		facts += " · Risiko %.2f" % m["risk"]
+	v.add_child(_label(facts, 13, C_BAD if lab.can_see_risk() and float(m["risk"]) >= 1.0 else C_DIM))
+	var id: int = int(m["id"])
+	if m["status"] == "api":
+		var rev := _label("", 14, C_GOOD)
+		product_labels.append({"label": rev, "id": id})
+		v.add_child(rev)
+	var act := HFlowContainer.new()
+	act.add_theme_constant_override("h_separation", 6)
+	act.add_theme_constant_override("v_separation", 4)
+	match m["status"]:
+		"ready":
+			act.add_child(_button("Paper", func(): _release(id, "paper"), "Ruf + Forschungszuschuss, kein Umsatz"))
+			act.add_child(_button("API", func(): _release(id, "api"), "Täglicher Umsatz über Nutzer"))
+			act.add_child(_button("Open Weights", func(): _release(id, "open"), "Viel Ruf und FP, doppeltes Risiko"))
+		"api":
+			if int(m.get("ad_until", 0)) > lab.day:
+				act.add_child(_label("Werbung läuft noch %d Tage" % (int(m["ad_until"]) - lab.day), 13, C_WARN))
+			else:
+				for ad in D.ADS:
+					var adid: String = ad["id"]
+					act.add_child(_button("%s · %s" % ["Online-Werbung" if adid == "online" else "Kampagne", lab.fmt_money(lab.ad_cost(adid))], func(): _show_error(lab.start_campaign(id, adid)),
+						"%s: +%d %% Nutzer-Potenzial für %d Tage" % [ad["name"], int(float(ad["boost"]) * 100), ad["days"]]))
+			act.add_child(_button("Zurückziehen", func(): lab.withdraw_model(id), "Kein Umsatz mehr, aber auch kein Risiko mehr."))
+	if act.get_child_count() > 0:
+		v.add_child(act)
+	else:
+		act.free()
+	return p
 
 
 func _release(id: int, kind: String) -> void:

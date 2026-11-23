@@ -508,7 +508,8 @@ func _total_appeal() -> float:
 func target_users(m: Dictionary, total := -1.0) -> float:
 	if total < 0.0:
 		total = _total_appeal()
-	return market_users() * model_appeal(m) / total * (0.55 + reputation / 110.0) * sales_mult() * (1.0 + ad_boost(m))
+	var raw := market_users() * model_appeal(m) / total * (0.55 + reputation / 110.0) * sales_mult() * (1.0 + ad_boost(m))
+	return minf(raw, market_users() * 0.9)   # mehr als 90 % des Marktes geht nicht
 
 func _step_users() -> void:
 	var total := _total_appeal()
