@@ -172,3 +172,12 @@ Kaffeebar (+10 % Forschung) · Konferenzräume (+Qualität) · Fitness & Ruherau
 - Boden: Holzdielen (versetzt, Farbvariation) bis Loft, Teppichfliesen ab Tech-Tower – als MultiMesh.
 - Umgebung je Stufe: Garage mit Einfahrt, Auto und Straße; sonst Gehweg, geschnittene Hecke mit Eingang, Blumenbeet, Bäume hinten. Tech-Tower als Dachterrasse mit Glasgeländer und Pflanzkübeln über der Stadt.
 - Ab Tech-Tower Trennwände hinter den Monitoren (brechen das Tisch-Raster auf). Rollen als schmale Ringe statt Scheiben.
+
+## 16. Kamera, Wirtschaft, Grundstücke, Finanzen, Berater (24.11.2026)
+
+- **Kamera:** Mausrad = Zoom zum Zeiger, links/mitte ziehen = verschieben (Welt klebt am Zeiger), rechts ziehen = drehen, WASD/Pfeile, Q/E = 45°, R = zurücksetzen. Alles weich, Ansicht begrenzt.
+- **Wirtschaft:** Markt +25 %/Jahr (statt +45 %), Büros 0–25 Mio., Rechenzentren 0,6–50 Mio., Fabrik 120 Mio., Investoren 0,15–120 Mio., Vertriebsbonus max. ×1,8. Spätes Spiel: ~50–150k $/Tag statt Millionen.
+- **Grundstücke:** 11 Flächen auf der Weltkarte in 3 Gegenden (Innenstadt/Industriegebiet/Grüne Energie), werden 2018–2023 nach und nach angeboten. Klick → kaufen, Rechenzentrum oder Chipfabrik bauen, verwalten. Ersetzt die abstrakte Standortwahl.
+- **Finanzen (Taste F):** Kassenbuch mit Kategorien, Kontoverlauf 2 Jahre, letzte 30 Tage nach Kategorie, laufende Kosten pro Tag, Jahresbilanz.
+- **Berater (Taste B):** bis zu 7 Tipps nach Wichtigkeit mit Sprung in den passenden Bereich; dringende Warnungen zusätzlich als Meldung.
+- **Balance (30 Bot-Runs):** 22 sichere AGI, 7 Pleiten, 1× Helix zuerst.

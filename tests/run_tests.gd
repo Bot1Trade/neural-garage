@@ -25,6 +25,7 @@ func _init() -> void:
 	test_chips()
 	test_audio_files()
 	test_focus_budget()
+	test_advice_and_ledger()
 	print("Tests: %d ok, %d fehlgeschlagen" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 
@@ -108,9 +109,15 @@ func test_offices() -> void:
 func test_datacenter() -> void:
 	var lab := new_lab()
 	lab.money = 100000000.0
-	check(lab.build_datacenter("colo", "isl") != "", "Colocation erst ab 2018")
+	check(lab.buy_plot("p6") != "", "Grundstück erst ab 2020")
+	check(lab.build_datacenter("colo", "p3") != "", "Ohne Grundstück kein Bau")
 	lab.day = 365 * 3
-	check(lab.build_datacenter("colo", "isl") == "", "Colocation in Island")
+	check(lab.plot_state("p3") == "for_sale", "Grundstück p3 zu kaufen")
+	check(lab.buy_plot("p3") == "", "Grundstück kaufen")
+	check(lab.plot_state("p3") == "empty", "Grundstück gehört dir")
+	check(lab.build_datacenter("colo", "p3") == "", "Colocation auf p3")
+	check(lab.plot_state("p3") == "dc", "Grundstück bebaut")
+	check(lab.build_datacenter("colo", "p3") != "", "Kein Doppelbau")
 	var p0: float = lab.compute_power()
 	check(lab.buy_hardware(0, "market", 100) == "", "100 GPUs kaufen")
 	check(lab.dc_used(lab.datacenters[0]) == 100, "100 belegt")
@@ -145,7 +152,10 @@ func test_chips() -> void:
 	check(float(chip["power"]) > float(market["power"]), "Eigener Chip stärker")
 	check(float(chip["price"]) < float(market["price"]) * 1.0, "Eigener Chip billiger")
 	lab.techs["fab"] = true
-	check(lab.build_fab() == "", "Fabrik bauen")
+	check(lab.build_fab("p1") != "", "Fabrik braucht eigenes Grundstück")
+	lab.buy_plot("p1")
+	check(lab.build_fab("p1") == "", "Fabrik bauen")
+	check(lab.plot_state("p1") == "fab", "Fabrik steht auf p1")
 	check(float(lab.hw_unit("custom")["price"]) < float(chip["price"]), "Fabrik senkt Preis")
 
 func test_audio_files() -> void:
@@ -173,6 +183,32 @@ func test_focus_budget() -> void:
 	check(lab.focus_spent(sc) == 10, "Skalieren ergibt genau 10")
 	lab.start_training(d)
 	check(lab.focus_spent(lab.training["design"]["focus"]) == 10, "Training speichert gekürzten Fokus")
+
+func test_advice_and_ledger() -> void:
+	var lab := new_lab()
+	var tips: Array = lab.advice()
+	var has_train := false
+	for t in tips:
+		if String(t["text"]).contains("kein Training"):
+			has_train = true
+	check(has_train, "Berater meldet: kein Training")
+	check(tips.size() > 0 and int(tips[0]["prio"]) >= int(tips[tips.size() - 1]["prio"]), "Tipps sortiert")
+	lab.money = 1000.0
+	lab.last_cost = 5000.0
+	lab.last_income = 0.0
+	check(int(lab.advice()[0]["prio"]) >= 100, "Geldnot steht oben")
+	var lab2 := new_lab()
+	for i in range(40):
+		lab2.step_day()
+		while not lab2.event_queue.is_empty():
+			lab2.resolve_event(0)
+	var month: Dictionary = lab2.ledger_month()
+	check(month.has("salary") and float(month["salary"]) < 0.0, "Kassenbuch: Gehälter gebucht")
+	check(lab2.ledger_days.size() == 30, "Kassenbuch hält 30 Tage")
+	var sum := 0.0
+	for k in lab2.ledger_year:
+		sum += float(lab2.ledger_year[k])
+	check(absf((80000.0 + sum) - lab2.money) < 1.0, "Kassenbuch erklärt den Kontostand")
 
 func test_bankrupt() -> void:
 	var lab := new_lab()

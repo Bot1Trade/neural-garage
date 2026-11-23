@@ -94,7 +94,9 @@ static func manage_infra(lab) -> void:
 		if lab.custom_chip.is_empty() or float(lab.custom_chip["power"]) < lab.gpu_power(lab.gpu_gen_now()) * 1.5:
 			lab.start_chip_project()
 	if lab.techs.has("fab") and not lab.has_fab and lab.money > D.FAB_COST * lab.inflation() * 3.0:
-		lab.build_fab()
+		var fp := pick_plot(lab, 0.0)
+		if fp != "":
+			lab.build_fab(fp)
 	# Neues RZ, wenn keins da ist oder alle fast voll sind
 	var full := true
 	for dc in lab.datacenters:
@@ -105,8 +107,10 @@ static func manage_infra(lab) -> void:
 			var t: Dictionary = D.DATACENTERS[i]
 			if i == 0 and lab.datacenters.size() >= 2:
 				break  # ab zwei Standorten nur noch größere Rechenzentren
-			if lab.year() >= int(t["year"]) and lab.money > lab.dc_build_cost(t["id"], "isl") * 1.5:
-				lab.build_datacenter(t["id"], "isl")
+			if lab.year() >= int(t["year"]) and lab.money > lab.dc_build_cost(t["id"], "p3") * 1.5 + 600000.0:
+				var pp := pick_plot(lab, lab.dc_build_cost(t["id"], "p3") * 1.5)
+				if pp != "":
+					lab.build_datacenter(t["id"], pp)
 				break
 	# Hardware kaufen: max. 30 % des Geldes pro Woche
 	var kind := "custom" if not lab.custom_chip.is_empty() else "market"
@@ -123,6 +127,25 @@ static func manage_infra(lab) -> void:
 			lab.buy_hardware(i, kind, n)
 		if not dc["upgrades"].has("cooling") and lab.money > lab.dc_upgrade_cost(dc, "cooling") * 4.0:
 			lab.buy_dc_upgrade(i, "cooling")
+
+## Freies eigenes Grundstück nehmen oder das günstigste (Strom zählt mit) kaufen
+static func pick_plot(lab, reserve: float) -> String:
+	var own: Array = lab.empty_plots()
+	if not own.is_empty():
+		return own[0]
+	var best := ""
+	var best_score := INF
+	for p in D.PLOTS:
+		if lab.plot_state(p["id"]) == "for_sale":
+			var power: float = lab._find(D.LOCATIONS, p["loc"])["power"]
+			var score: float = lab.plot_price(p["id"]) * (0.5 + power)
+			if score < best_score:
+				best_score = score
+				best = p["id"]
+	if best != "" and lab.money > lab.plot_price(best) + reserve:
+		lab.buy_plot(best)
+		return best
+	return ""
 
 ## Bot kennt den Zeitgeist ungefähr (wie ein erfahrener Spieler)
 static func era_focus(lab) -> Dictionary:

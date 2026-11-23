@@ -7,7 +7,7 @@ const D = preload("res://scripts/sim/data.gd")
 const SAVE_KEYS := ["day", "money", "total_revenue", "reputation", "equity", "office", "staff", "candidates",
 	"gpus", "techs", "rp", "models", "training", "data_unlocked", "flags", "cooldowns", "rival", "goal_index",
 	"investor_stage", "investor_next_day", "broke_days", "best_rating", "best_q", "gpu_price_mult",
-	"gpu_shortage_days", "ending", "news", "news_total", "ledger_days", "ledger_today", "ledger_year", "ledger_last_year", "money_hist", "office_upgrades", "datacenters", "chip_version", "chip_project", "custom_chip", "has_fab", "event_queue", "next_model_id", "era_index"]
+	"gpu_shortage_days", "ending", "news", "news_total", "ledger_days", "ledger_today", "plots", "fab_plot", "last_feedback", "ledger_year", "ledger_last_year", "money_hist", "office_upgrades", "datacenters", "chip_version", "chip_project", "custom_chip", "has_fab", "event_queue", "next_model_id", "era_index"]
 const INT_KEYS := ["day", "office", "goal_index", "investor_stage", "investor_next_day", "broke_days",
 	"gpu_shortage_days", "next_model_id", "era_index", "news_total", "chip_version"]
 
@@ -49,6 +49,9 @@ var chip_version: int = 0
 var chip_project: Dictionary = {}     # {progress, version}
 var custom_chip: Dictionary = {}      # {name, power, base}  (base = Tagesmiete-Äquivalent bei Fertigstellung)
 var has_fab: bool = false
+var plots: Dictionary = {}            # Grundstück-ID -> "" (leer) | "dc" | "fab"
+var fab_plot: String = ""
+var last_feedback: Array = []         # letztes Kritik-Feedback (für den Berater)
 var ledger_days: Array = []          # letzte 30 Tage: [{kategorie: betrag}]
 var ledger_today: Dictionary = {}
 var ledger_year: Dictionary = {}       # laufendes Jahr
@@ -457,6 +460,7 @@ func release_model(id: int, kind: String) -> Dictionary:
 	if flags.get("regulation", false) and kind != "paper" and int(m["eval_days"]) < 14:
 		fine = 20000.0 * market()
 		book("fines", -(fine))
+	last_feedback = _feedback(m["focus"])
 	var report := {"name": m["name"], "kind": kind, "rating": rating, "rep_gain": rep_gain, "money_gain": money_gain,
 		"quotes": _quotes(rating), "feedback": _feedback(m["focus"]), "rival_q": rival["best_q"], "q": m["q"], "fine": fine}
 	var kind_name: String = {"paper": "als Paper", "api": "als API", "open": "mit offenen Gewichten"}[kind]
@@ -680,22 +684,63 @@ func daily_dc_cost() -> float:
 		c += dc_daily_cost(dc)
 	return c
 
-func dc_build_cost(type_id: String, loc_id: String) -> float:
-	return float(_find(D.DATACENTERS, type_id)["cost"]) * float(_find(D.LOCATIONS, loc_id)["build"]) * inflation()
+# ---- Grundstücke
 
-func build_datacenter(type_id: String, loc_id: String) -> String:
+func plot(id: String) -> Dictionary:
+	return _find(D.PLOTS, id)
+
+## "locked" (noch nicht im Angebot), "for_sale", "empty" (gehört dir), "dc", "fab"
+func plot_state(id: String) -> String:
+	if plots.has(id):
+		return "empty" if plots[id] == "" else String(plots[id])
+	if year() < int(plot(id)["year"]):
+		return "locked"
+	return "for_sale"
+
+func plot_price(id: String) -> float:
+	return float(plot(id)["price"]) * inflation()
+
+func buy_plot(id: String) -> String:
+	if plot_state(id) != "for_sale":
+		return "Grundstück steht nicht zum Verkauf."
+	var price := plot_price(id)
+	if money < price:
+		return "Nicht genug Geld."
+	book("building", -price)
+	plots[id] = ""
+	_news("Grundstück gekauft: [b]%s[/b] (%s)." % [plot(id)["name"], _find(D.LOCATIONS, plot(id)["loc"])["name"]])
+	revision += 1
+	return ""
+
+func empty_plots() -> Array:
+	var out := []
+	for p in D.PLOTS:
+		if plot_state(p["id"]) == "empty":
+			out.append(p["id"])
+	return out
+
+func dc_build_cost(type_id: String, plot_id: String) -> float:
+	var p := plot(plot_id)
+	var build := float(_find(D.LOCATIONS, p["loc"])["build"]) if not p.is_empty() else 1.0
+	return float(_find(D.DATACENTERS, type_id)["cost"]) * build * inflation()
+
+func build_datacenter(type_id: String, plot_id: String) -> String:
 	var t := _find(D.DATACENTERS, type_id)
-	if t.is_empty() or _find(D.LOCATIONS, loc_id).is_empty():
-		return "Unbekannter Typ oder Standort."
+	if t.is_empty():
+		return "Unbekannter Typ."
+	if plot_state(plot_id) != "empty":
+		return "Kaufe zuerst ein freies Grundstück (Weltansicht)."
 	if year() < int(t["year"]):
 		return "Verfügbar ab %d." % t["year"]
-	var cost := dc_build_cost(type_id, loc_id)
+	var cost := dc_build_cost(type_id, plot_id)
 	if money < cost:
 		return "Nicht genug Geld."
 	book("building", -(cost))
-	datacenters.append({"type": type_id, "loc": loc_id, "upgrades": {}, "hw": []})
+	var loc_id: String = plot(plot_id)["loc"]
+	datacenters.append({"type": type_id, "loc": loc_id, "plot": plot_id, "upgrades": {}, "hw": []})
+	plots[plot_id] = "dc"
 	fx.append("build")
-	_news("[color=#7fd]Bau:[/color] %s in %s ist in Betrieb." % [t["name"], _find(D.LOCATIONS, loc_id)["name"]])
+	_news("[color=#7fd]Bau:[/color] %s auf „%s“ ist in Betrieb." % [t["name"], plot(plot_id)["name"]])
 	revision += 1
 	return ""
 
@@ -796,16 +841,21 @@ func _step_chip() -> void:
 		_info("Eigener Chip fertig: %s" % custom_chip["name"],
 			"Dein Team hat einen eigenen KI-Beschleuniger entwickelt: %.0f Leistung pro Chip (Markt-GPU: %.0f) zu %.0f %% des Marktpreises.\n\nKaufen kannst du ihn für deine Rechenzentren unter dem Haus-Symbol (Ausbau)." % [custom_chip["power"], gpu_power(gen), D.CHIP_PRICE * 100.0 * (0.5 if has_fab else 1.0)])
 
-func build_fab() -> String:
+func build_fab(plot_id: String) -> String:
 	if not techs.has("fab"):
 		return "Erforsche zuerst 'Chip-Fertigung'."
 	if has_fab:
 		return "Du hast schon eine Fabrik."
+	if plot_state(plot_id) != "empty":
+		return "Kaufe zuerst ein freies Grundstück (Weltansicht)."
 	var cost := D.FAB_COST * inflation()
 	if money < cost:
 		return "Nicht genug Geld."
 	book("building", -(cost))
 	has_fab = true
+	fab_plot = plot_id
+	plots[plot_id] = "fab"
+	fx.append("build")
 	reputation = minf(100.0, reputation + 3.0)
 	_news("[color=#7fd]Eigene Chipfabrik eröffnet![/color] Chips halb so teuer, keine Lieferengpässe mehr.")
 	revision += 1
@@ -1183,6 +1233,78 @@ func score() -> int:
 	if ending.get("id", "") == "aligned":
 		s *= 2.0
 	return int(s)
+
+
+# ---------------------------------------------------------------- Berater
+
+## Tipps nach Wichtigkeit: [{prio, text, tab, icon}] – tab = Seitenleisten-Bereich (UI)
+func advice() -> Array:
+	var tips := []
+	var burn := last_cost - last_income
+	# Geld
+	if burn > 0.0 and money > 0.0 and money / burn < 90.0:
+		var biggest := _biggest_cost()
+		tips.append({"prio": 100, "icon": "emote_alert", "tab": 8,
+			"text": "Dein Geld reicht nur noch ~%d Tage. Größter Kostenblock: %s (%s/Tag). Kosten senken (GPUs zurückgeben, weniger Personal) oder ein neues Modell als API veröffentlichen." % [int(money / burn), biggest[0], fmt_money(biggest[1])]})
+	elif money < 0.0:
+		tips.append({"prio": 110, "icon": "emote_alert", "tab": 8, "text": "Konto im Minus! Nach 60 Tagen ist das Labor pleite. Sofort Kosten senken oder Geld beschaffen."})
+	# Modelle
+	for m in models:
+		if m["status"] == "ready":
+			tips.append({"prio": 85, "icon": "emote_exclamation", "tab": 4, "text": "„%s“ ist fertig, aber noch nicht veröffentlicht – es bringt so weder Geld noch Ruf." % m["name"]})
+			break
+	if training.is_empty() and compute_power() > 0.0:
+		tips.append({"prio": 80, "icon": "emote_dots3", "tab": 0, "text": "Gerade läuft kein Training – deine Rechenleistung (%s/Tag) bleibt ungenutzt. Starte ein neues Modell." % fmt_money(daily_gpu_cost() + daily_dc_cost())})
+	var best_rel := 0.0
+	var has_api := false
+	for m in models:
+		if m["status"] == "api":
+			has_api = true
+			best_rel = maxf(best_rel, float(m["q"]) / expected_quality())
+	if has_api and best_rel < 0.85:
+		tips.append({"prio": 65, "icon": "emote_faceSad", "tab": 0, "text": "Deine API-Modelle sind veraltet (bestes: %d %% des Marktniveaus) – der Umsatz sinkt jeden Tag. Zeit für ein größeres oder moderneres Modell." % int(best_rel * 100)})
+	if not last_feedback.is_empty() and not " ".join(last_feedback).contains("genau"):
+		tips.append({"prio": 55, "icon": "emote_idea", "tab": 0, "text": "Letzte Kritik: „%s“ Verteile die Fokus-Punkte beim nächsten Modell entsprechend." % " ".join(last_feedback)})
+	# Risiko
+	var released := 0
+	for m in models:
+		if m["status"] in ["api", "open"]:
+			released += 1
+	if released > 0 and not can_see_risk():
+		tips.append({"prio": 70, "icon": "emote_question", "tab": 1, "text": "Du kannst das Risiko deiner Modelle nicht sehen. Stell jemanden für Safety ein – das senkt es auch."})
+	elif hidden_risk() > 3.0:
+		tips.append({"prio": 90, "icon": "emote_alert", "tab": 4, "text": "Risiko %.1f: Sicherheitsvorfälle werden wahrscheinlich. Riskante Modelle zurückziehen, mehr Sicherheits-Punkte und Evaluierungstage, Safety-Forschung." % hidden_risk()})
+	# Forschung
+	for t in D.TECHS:
+		if tech_state(t["id"]) == "available" and rp >= float(t["rp"]):
+			tips.append({"prio": 60, "icon": "emote_idea", "tab": 3, "text": "Du kannst „%s“ erforschen (%d FP vorhanden). %s" % [t["name"], int(rp), t["desc"]]})
+			break
+	# Hardware
+	var old := 0
+	for g in gpus:
+		if int(g["gen"]) < gpu_gen_now():
+			old += int(g["count"])
+	if old > 0:
+		tips.append({"prio": 50, "icon": "emote_swirl", "tab": 2, "text": "%d deiner gemieteten GPUs sind veraltet. Gen %d hat doppelte Leistung – alte zurückgeben und neue mieten." % [old, gpu_gen_now()]})
+	if year() >= 2018 and datacenters.is_empty() and gpu_count() >= 64 and money > 1000000.0:
+		tips.append({"prio": 40, "icon": "emote_cash", "tab": 5, "text": "Du zahlst %s/Tag GPU-Miete. Ein eigenes Rechenzentrum (Grundstück in der Weltansicht kaufen) kostet langfristig nur ~%d %% davon." % [fmt_money(daily_gpu_cost()), int(D.UPKEEP_SHARE * 100 * 0.85)]})
+	# Team & Büro
+	var cap := int(office_data()["staff"])
+	if staff.size() < cap and last_income > last_cost * 1.2:
+		tips.append({"prio": 45, "icon": "emote_heart", "tab": 1, "text": "Platz für %d weitere Leute und du machst Gewinn – mehr Team bedeutet bessere und schnellere Modelle." % (cap - staff.size())})
+	elif staff.size() >= cap and office < D.OFFICES.size() - 1 and money > float(D.OFFICES[office + 1]["cost"]) * 2.0:
+		tips.append({"prio": 40, "icon": "emote_star", "tab": 5, "text": "Dein Büro ist voll. Ein Umzug (%s) bringt Platz für mehr Personal und GPUs." % D.OFFICES[office + 1]["name"]})
+	# Konkurrenz
+	if float(rival["best_q"]) > best_q * 1.15 and best_q > 0.0:
+		tips.append({"prio": 30, "icon": "emote_anger", "tab": 0, "text": "Helix ist dir voraus (Qualität %.0f gegen deine %.0f). Größere Modelle, bessere Daten und mehr Forschende helfen." % [rival["best_q"], best_q]})
+	tips.sort_custom(func(a, b): return int(a["prio"]) > int(b["prio"]))
+	return tips
+
+
+func _biggest_cost() -> Array:
+	var items := [["Gehälter", daily_salaries()], ["GPU-Miete", daily_gpu_cost()], ["Rechenzentren", daily_dc_cost()]]
+	items.sort_custom(func(a, b): return float(a[1]) > float(b[1]))
+	return items[0]
 
 
 # ---------------------------------------------------------------- Kassenbuch

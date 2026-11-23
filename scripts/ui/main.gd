@@ -21,6 +21,8 @@ const TOOLS := [
 	{"icon": "icons/home", "title": "Ausbau", "tip": "Büros, Rechenzentren, Chips"},
 	{"icon": "icons/trophy", "title": "Ziele", "tip": "Ziele"},
 	{"icon": "icons/exclamation", "title": "Neuigkeiten", "tip": "Alle Neuigkeiten"},
+	{"icon": "icons/barsVertical", "title": "Finanzen", "tip": "Wofür geht das Geld raus? (Taste F)"},
+	{"icon": "emotes/emote_question", "title": "Berater", "tip": "Tipps, wie du effektiver wirst (Taste B)"},
 ]
 
 const C_BG := Color("13151b")
@@ -54,6 +56,13 @@ var tab_compute: VBoxContainer
 var tab_research: VBoxContainer
 var tab_products: VBoxContainer
 var tab_infra: VBoxContainer
+var tab_finance: VBoxContainer
+var tab_advisor: VBoxContainer
+var finance_day := -1
+var advisor_day := -1
+var last_advice_toast := -1000
+var last_advice_text := ""
+var advice_checked_day := -1
 var chip_bar: ProgressBar
 var infra_type_sel := 0
 var infra_loc_sel := 2
@@ -71,6 +80,7 @@ var audio: Node
 var ui_ready := false
 var sound_popup: PopupPanel
 var gfx_popup: PopupPanel
+var plot_popup: PopupPanel
 var focus_sliders := {}
 var focus_info: Label
 var focus_lock := false
@@ -172,6 +182,10 @@ func _unhandled_input(e: InputEvent) -> void:
 				_toggle_world()
 			KEY_M:
 				_open_tab(0)
+			KEY_F:
+				_open_tab(8)
+			KEY_B:
+				_open_tab(9)
 
 
 func _set_speed(i: int) -> void:
@@ -236,6 +250,11 @@ func _refresh() -> void:
 		research_rp_label.text = "Forschungspunkte: %.0f  (+%.2f pro Tag)" % [lab.rp, lab.rp_per_day()]
 	for rb in research_btns:
 		rb["btn"].disabled = lab.rp < rb["cost"]
+	if drawer.visible and tabs.current_tab == 8 and lab.day != finance_day:
+		_build_finance()
+	if drawer.visible and tabs.current_tab == 9 and (lab.day - advisor_day >= 3 or lab.revision != built_rev or advisor_day < 0):
+		_build_advisor()
+	_advisor_toast()
 	if chip_bar != null and not lab.chip_project.is_empty():
 		chip_bar.value = 100.0 * float(lab.chip_project["progress"])
 	for pl in product_labels:
@@ -664,45 +683,13 @@ func _build_infra() -> void:
 			row.add_child(_button("Kaufen: %s" % lab.fmt_money(u["cost"]), func(): _show_error(lab.buy_office_upgrade(id))))
 		tab_infra.add_child(row)
 
-	# ---- Rechenzentren
+	# ---- Grundstücke & Rechenzentren
 	tab_infra.add_child(HSeparator.new())
-	tab_infra.add_child(_label("Eigene Rechenzentren", 22, C_ACCENT))
-	tab_infra.add_child(_wrap("Hardware kaufen statt mieten: Eine Einheit kostet einmalig etwa %d Tage Miete, danach nur Strom und Wartung (%d %% der Miete, je nach Standort). Lohnt sich, wenn du die Hardware lange nutzt. Gekaufte GPUs veralten mit jeder neuen Generation." % [int(D.BUY_DAYS), int(D.UPKEEP_SHARE * 100)], C_DIM))
-	var build := HFlowContainer.new()
-	build.add_theme_constant_override("h_separation", 10)
-	build.add_theme_constant_override("v_separation", 6)
-	var type_opt := OptionButton.new()
-	var types := []
-	for t in D.DATACENTERS:
-		if lab.year() >= int(t["year"]):
-			types.append(t)
-			type_opt.add_item("%s (%d Plätze)" % [t["name"], t["slots"]])
-			type_opt.set_item_tooltip(types.size() - 1, t["desc"])
-	var loc_opt := OptionButton.new()
-	for i in range(D.LOCATIONS.size()):
-		var l: Dictionary = D.LOCATIONS[i]
-		loc_opt.add_item("%s (Strom ×%.2f, Bau ×%.1f)" % [l["name"], l["power"], l["build"]])
-		loc_opt.set_item_tooltip(i, l["desc"])
-	if types.is_empty():
-		type_opt.free()
-		loc_opt.free()
-		build.free()
-		tab_infra.add_child(_label("Ab 2018 kannst du eigene Server betreiben.", 15, C_DIM))
-	else:
-		infra_type_sel = clampi(infra_type_sel, 0, types.size() - 1)
-		type_opt.select(infra_type_sel)
-		loc_opt.select(infra_loc_sel)
-		var cost_l := _label("", 15, C_DIM)
-		var upd := func():
-			cost_l.text = "Baukosten: %s" % lab.fmt_money(lab.dc_build_cost(types[infra_type_sel]["id"], D.LOCATIONS[infra_loc_sel]["id"]))
-		upd.call()
-		type_opt.item_selected.connect(func(i): infra_type_sel = i; upd.call())
-		loc_opt.item_selected.connect(func(i): infra_loc_sel = i; upd.call())
-		build.add_child(type_opt)
-		build.add_child(loc_opt)
-		build.add_child(cost_l)
-		build.add_child(_button("Bauen", func(): _show_error(lab.build_datacenter(types[infra_type_sel]["id"], D.LOCATIONS[infra_loc_sel]["id"]))))
-		tab_infra.add_child(build)
+	tab_infra.add_child(_label("Grundstücke & Rechenzentren", 22, C_ACCENT))
+	tab_infra.add_child(_wrap("Kaufe ein Grundstück (auch per Klick in der Weltansicht) und baue darauf ein Rechenzentrum oder die Chipfabrik. Die Gegend bestimmt Strompreis und Baukosten. Hardware im Rechenzentrum kostet einmalig ~%d Tage Miete, danach nur Strom (%d %% der Miete × Gegend)." % [int(D.BUY_DAYS), int(D.UPKEEP_SHARE * 100)], C_DIM))
+	for pl in D.PLOTS:
+		if lab.plot_state(pl["id"]) != "dc":
+			tab_infra.add_child(_plot_box(pl["id"], false))
 	for i in range(lab.datacenters.size()):
 		tab_infra.add_child(_dc_panel(i))
 
@@ -729,9 +716,90 @@ func _build_infra() -> void:
 		if lab.has_fab:
 			tab_infra.add_child(_label("Eigene Chipfabrik in Betrieb: Chips halb so teuer, keine Lieferengpässe.", 15, C_GOOD))
 		elif lab.techs.has("fab"):
-			tab_infra.add_child(_button("Chipfabrik bauen: %s" % lab.fmt_money(D.FAB_COST * lab.inflation()), func(): _show_error(lab.build_fab())))
+			tab_infra.add_child(_label("Chipfabrik (%s): auf einem eigenen leeren Grundstück bauen – oben unter „Grundstücke“ oder per Klick in der Weltansicht." % lab.fmt_money(D.FAB_COST * lab.inflation()), 15, C_WARN))
 		else:
 			tab_infra.add_child(_label("Erforsche 'Chip-Fertigung' (ab 2024) für eine eigene Fabrik.", 15, C_DIM))
+
+
+## Grundstück mit allen passenden Aktionen (für Ausbau-Tab und Klick-Popup)
+func _plot_box(id: String, big: bool) -> Control:
+	var pl: Dictionary = lab.plot(id)
+	var loc: Dictionary = lab._find(D.LOCATIONS, pl["loc"])
+	var st: String = lab.plot_state(id)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 6)
+	var state_txt: String = {"locked": "ab %d im Angebot" % pl["year"], "for_sale": "zu verkaufen", "empty": "dein Grundstück (leer)", "dc": "Rechenzentrum", "fab": "Chipfabrik"}[st]
+	v.add_child(_label("%s  ·  %s" % [pl["name"], state_txt], 20 if big else 16, C_ACCENT if st in ["empty", "dc", "fab"] else C_TEXT))
+	v.add_child(_label("%s  ·  Strom ×%.2f  ·  Baukosten ×%.1f" % [loc["name"], loc["power"], loc["build"]], 14, C_DIM))
+	var row := HFlowContainer.new()
+	row.add_theme_constant_override("h_separation", 8)
+	row.add_theme_constant_override("v_separation", 6)
+	match st:
+		"for_sale":
+			row.add_child(_button("Kaufen: %s" % lab.fmt_money(lab.plot_price(id)), func(): _plot_action(lab.buy_plot(id))))
+		"empty":
+			for t in D.DATACENTERS:
+				if lab.year() >= int(t["year"]):
+					var tid: String = t["id"]
+					row.add_child(_button("%s bauen: %s" % [t["name"], lab.fmt_money(lab.dc_build_cost(tid, id))], func(): _plot_action(lab.build_datacenter(tid, id)), "%s · %d Plätze" % [t["desc"], t["slots"]]))
+			if lab.techs.has("fab") and not lab.has_fab:
+				row.add_child(_button("Chipfabrik bauen: %s" % lab.fmt_money(D.FAB_COST * lab.inflation()), func(): _plot_action(lab.build_fab(id))))
+			if row.get_child_count() == 0:
+				row.add_child(_label("Bauen ab 2018 (Rechenzentrum) bzw. mit Forschung „Chip-Fertigung“ (Fabrik).", 14, C_DIM))
+		"dc":
+			row.add_child(_button("Rechenzentrum verwalten", func(): _close_plot_popup(); _open_tab(5)))
+		"fab":
+			row.add_child(_label("Chips halb so teuer, keine Lieferengpässe.", 14, C_GOOD))
+	if row.get_child_count() > 0:
+		v.add_child(row)
+	else:
+		row.free()
+	if big:
+		return v
+	var p := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color("15181e")
+	sb.border_color = C_PANEL2
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(6)
+	sb.set_content_margin_all(10)
+	p.add_theme_stylebox_override("panel", sb)
+	p.add_child(v)
+	return p
+
+
+func _plot_action(err: String) -> void:
+	_show_error(err)
+	if err == "":
+		_close_plot_popup()
+
+
+func _close_plot_popup() -> void:
+	if plot_popup != null:
+		plot_popup.hide()
+
+
+## Klick auf den Boden: Grundstück → Menü, eigenes Labor → ins Büro
+func _on_ground_click(pos: Vector3) -> void:
+	if office_view.mode != "world" or modal.visible:
+		return
+	var id: String = office_view.plot_at(pos)
+	if id != "":
+		audio.play("open")
+		if plot_popup == null:
+			plot_popup = PopupPanel.new()
+			plot_popup.add_theme_stylebox_override("panel", _hud_style(Color(0.09, 0.1, 0.13, 0.97), 10))
+			add_child(plot_popup)
+		for c in plot_popup.get_children():
+			plot_popup.remove_child(c)
+			c.queue_free()
+		var box := _plot_box(id, true)
+		box.custom_minimum_size.x = 460
+		plot_popup.add_child(box)
+		var mp := get_viewport().get_mouse_position()
+		plot_popup.popup(Rect2i(Vector2i(mp + Vector2(16, 16)), Vector2i(480, 10)))
+	elif pos.distance_to(office_view.LAB_POS) < 2.2:
+		_toggle_world()
 
 
 func _dc_panel(i: int) -> PanelContainer:
@@ -747,7 +815,8 @@ func _dc_panel(i: int) -> PanelContainer:
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 6)
 	p.add_child(v)
-	v.add_child(_label("%s  ·  %s" % [lab.dc_type(dc)["name"], lab.dc_loc(dc)["name"]], 17, C_ACCENT))
+	var plot_name: String = lab.plot(String(dc.get("plot", ""))).get("name", "")
+	v.add_child(_label("%s  ·  %s%s" % [lab.dc_type(dc)["name"], lab.dc_loc(dc)["name"], ("  ·  " + plot_name) if plot_name != "" else ""], 17, C_ACCENT))
 	v.add_child(_label("Belegt %d/%d  ·  Leistung %.0f  ·  Kosten %s/Tag" % [lab.dc_used(dc), lab.dc_slots(dc), lab.dc_power(dc), lab.fmt_money(lab.dc_daily_cost(dc))], 15))
 	for h in dc["hw"]:
 		v.add_child(_label("   %s: %d Stück (je %.0f Leistung)" % [h["name"], int(h["count"]), h["power"]], 14, C_DIM))
@@ -781,6 +850,150 @@ func _dc_panel(i: int) -> PanelContainer:
 			ups.add_child(_button("%s: %s" % [u["name"], lab.fmt_money(lab.dc_upgrade_cost(dc, id))], func(): _show_error(lab.buy_dc_upgrade(i, id)), u["desc"]))
 	v.add_child(ups)
 	return p
+
+
+func _build_finance() -> void:
+	_clear(tab_finance)
+	finance_day = lab.day
+	var net: float = lab.last_income - lab.last_cost
+	tab_finance.add_child(_label("Kontostand: %s" % lab.fmt_money(lab.money), 22, C_GOOD if lab.money >= 0.0 else C_BAD))
+	tab_finance.add_child(_label("Heute: %s Einnahmen  ·  %s Kosten  ·  Bilanz %s%s" % [lab.fmt_money(lab.last_income), lab.fmt_money(lab.last_cost), "+" if net >= 0.0 else "", lab.fmt_money(net)], 15, C_GOOD if net >= 0.0 else C_WARN))
+	# Verlauf
+	tab_finance.add_child(_label("Kontostand der letzten 2 Jahre", 16, C_ACCENT))
+	var chart := Control.new()
+	chart.custom_minimum_size = Vector2(0, 150)
+	chart.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var hist: Array = lab.money_hist.duplicate()
+	hist.append(lab.money)
+	chart.draw.connect(func():
+		var sz := chart.size
+		chart.draw_rect(Rect2(Vector2.ZERO, sz), Color(0, 0, 0, 0.25))
+		if hist.size() < 2:
+			return
+		var lo: float = minf(0.0, hist.min())
+		var hi: float = maxf(1.0, hist.max())
+		var pts := PackedVector2Array()
+		for i in range(hist.size()):
+			var x := sz.x * i / float(hist.size() - 1)
+			var y := sz.y - (float(hist[i]) - lo) / (hi - lo) * (sz.y - 10.0) - 5.0
+			pts.append(Vector2(x, y))
+		var zero_y := sz.y - (0.0 - lo) / (hi - lo) * (sz.y - 10.0) - 5.0
+		chart.draw_line(Vector2(0, zero_y), Vector2(sz.x, zero_y), Color(1, 1, 1, 0.15), 1.0)
+		chart.draw_polyline(pts, C_ACCENT, 2.5, true)
+		var f := chart.get_theme_default_font()
+		chart.draw_string(f, Vector2(6, 16), lab.fmt_money(hi), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, C_DIM)
+		chart.draw_string(f, Vector2(6, sz.y - 6), lab.fmt_money(lo), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, C_DIM))
+	tab_finance.add_child(chart)
+	# Letzte 30 Tage nach Kategorie
+	var month: Dictionary = lab.ledger_month()
+	var inc := 0.0
+	var exp := 0.0
+	for k in month:
+		if float(month[k]) >= 0.0:
+			inc += float(month[k])
+		else:
+			exp += float(month[k])
+	tab_finance.add_child(_label("Letzte 30 Tage: %s rein · %s raus · Saldo %s" % [lab.fmt_money(inc), lab.fmt_money(-exp), lab.fmt_money(inc + exp)], 16, C_ACCENT))
+	var keys := month.keys()
+	keys.sort_custom(func(a, b): return float(month[a]) > float(month[b]))
+	var max_abs := 1.0
+	for k in keys:
+		max_abs = maxf(max_abs, absf(float(month[k])))
+	for k in keys:
+		var val := float(month[k])
+		if absf(val) < 1.0:
+			continue
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 10)
+		var nl := _label(D.LEDGER_NAMES.get(k, k), 14)
+		nl.custom_minimum_size.x = 200
+		row.add_child(nl)
+		var bar := ProgressBar.new()
+		bar.show_percentage = false
+		bar.max_value = max_abs
+		bar.value = absf(val)
+		bar.custom_minimum_size = Vector2(120, 14)
+		bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		var fill := StyleBoxFlat.new()
+		fill.bg_color = C_GOOD.darkened(0.2) if val >= 0.0 else C_BAD.darkened(0.15)
+		fill.set_corner_radius_all(3)
+		bar.add_theme_stylebox_override("fill", fill)
+		row.add_child(bar)
+		var vl := _label("%s%s" % ["+" if val >= 0.0 else "−", lab.fmt_money(absf(val))], 14, C_GOOD if val >= 0.0 else C_BAD)
+		vl.custom_minimum_size.x = 100
+		vl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		row.add_child(vl)
+		tab_finance.add_child(row)
+	if keys.is_empty():
+		tab_finance.add_child(_label("Noch keine Buchungen.", 14, C_DIM))
+	# Laufende Kosten pro Tag
+	tab_finance.add_child(HSeparator.new())
+	tab_finance.add_child(_label("Laufende Kosten pro Tag", 16, C_ACCENT))
+	for item in [["Gehälter (%d Personen)" % lab.staff.size(), lab.daily_salaries()], ["GPU-Miete (%d GPUs)" % lab.gpu_count(), lab.daily_gpu_cost()], ["Rechenzentren: Strom & Wartung", lab.daily_dc_cost()]]:
+		var share: float = float(item[1]) / maxf(1.0, lab.last_cost) * 100.0
+		tab_finance.add_child(_label("%s:  %s  (%d %%)" % [item[0], lab.fmt_money(item[1]), int(share)], 14))
+	# Jahresbilanz
+	tab_finance.add_child(HSeparator.new())
+	for pair in [["Dieses Jahr", lab.ledger_year], ["Letztes Jahr", lab.ledger_last_year]]:
+		var dct: Dictionary = pair[1]
+		if dct.is_empty():
+			continue
+		var a := 0.0
+		var b := 0.0
+		for k in dct:
+			if float(dct[k]) >= 0.0:
+				a += float(dct[k])
+			else:
+				b += float(dct[k])
+		tab_finance.add_child(_label("%s: %s Einnahmen · %s Ausgaben · Saldo %s" % [pair[0], lab.fmt_money(a), lab.fmt_money(-b), lab.fmt_money(a + b)], 14, C_DIM))
+
+
+func _build_advisor() -> void:
+	_clear(tab_advisor)
+	advisor_day = lab.day
+	var tips: Array = lab.advice()
+	if tips.is_empty():
+		tab_advisor.add_child(_label("Alles im grünen Bereich – weiter so!", 16, C_GOOD))
+		return
+	tab_advisor.add_child(_wrap("Die wichtigsten Hinweise zuerst. Der Knopf öffnet den passenden Bereich.", C_DIM))
+	for tip in tips.slice(0, 7):
+		var p := PanelContainer.new()
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color("15181e")
+		sb.border_color = C_BAD if int(tip["prio"]) >= 85 else (C_WARN if int(tip["prio"]) >= 60 else C_PANEL2)
+		sb.set_border_width_all(1)
+		sb.set_corner_radius_all(6)
+		sb.set_content_margin_all(10)
+		p.add_theme_stylebox_override("panel", sb)
+		var h := HBoxContainer.new()
+		h.add_theme_constant_override("separation", 10)
+		p.add_child(h)
+		h.add_child(_icon_rect("emotes/" + String(tip["icon"]), 34))
+		var l := _wrap(tip["text"], C_TEXT)
+		l.add_theme_font_size_override("font_size", 15)
+		h.add_child(l)
+		var tab_i: int = tip["tab"]
+		var b := _button(String(TOOLS[tab_i]["title"]), func(): _open_tab(tab_i))
+		b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		h.add_child(b)
+		tab_advisor.add_child(p)
+
+
+## Wichtige Warnung ab und zu als Meldung
+func _advisor_toast() -> void:
+	if lab.day - last_advice_toast < 45 or lab.day == advice_checked_day:
+		return
+	advice_checked_day = lab.day
+	var tips: Array = lab.advice()
+	if tips.is_empty() or int(tips[0]["prio"]) < 80:
+		return
+	var txt: String = tips[0]["text"]
+	if txt == last_advice_text:
+		return
+	last_advice_toast = lab.day
+	last_advice_text = txt
+	_toast("[color=#ffc66b]Berater:[/color] " + txt)
 
 
 func _build_goals() -> void:
@@ -898,6 +1111,7 @@ func _build_ui() -> void:
 	office_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(office_view)
 	office_view.fx_event.connect(func(f): audio.play(f))
+	office_view.clicked_ground.connect(_on_ground_click)
 
 	# Obere Leiste
 	var topm := MarginContainer.new()
@@ -969,6 +1183,8 @@ func _build_ui() -> void:
 	news_box.add_theme_font_size_override("normal_font_size", 14)
 	news_box.add_theme_font_size_override("bold_font_size", 14)
 	tabs.add_child(news_box)
+	tab_finance = _add_tab("Finanzen")
+	tab_advisor = _add_tab("Berater")
 
 	# Werkzeugleiste unten
 	var bar_wrap := CenterContainer.new()
@@ -1192,6 +1408,10 @@ func _open_tab(i: int) -> void:
 	drawer_icon.texture = _tex(TOOLS[i]["icon"])
 	drawer.visible = true
 	highlight_tool(-2)
+	if i == 8:
+		_build_finance()
+	elif i == 9:
+		_build_advisor()
 
 
 ## Tutorial markiert ein Werkzeug (-1 = keins). -2 = nur aktiven Zustand neu setzen.

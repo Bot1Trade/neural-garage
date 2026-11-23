@@ -76,6 +76,7 @@ var yaw_t := 45.0
 var zoom_t := 1.0
 var pan_t := Vector3.ZERO
 var hover_ground := Vector3(0, -1000, 0)
+var plot_highlight: MeshInstance3D
 var walls_x: Array = []
 var walls_z: Array = []
 
@@ -350,6 +351,12 @@ func _process(delta: float) -> void:
 	for f in lab.fx:
 		_play_fx(f)
 	lab.fx.clear()
+	if mode == "world" and plot_highlight != null and is_instance_valid(plot_highlight):
+		var hp := plot_at(hover_ground)
+		plot_highlight.visible = hp != ""
+		if hp != "":
+			var pl: Dictionary = lab.plot(hp)
+			plot_highlight.position = Vector3(float(pl["pos"][0]), 0.03, float(pl["pos"][1]))
 	for c in cars:
 		c["pos"] = float(c["pos"]) + float(c["speed"]) * float(c["dir"]) * delta
 		if absf(c["pos"]) > 15.0:
@@ -393,6 +400,8 @@ func _scene_key() -> String:
 		var dcs := ""
 		for dc in lab.datacenters:
 			dcs += dc["type"]
+		for pl in D.PLOTS:
+			dcs += String(lab.plot_state(pl["id"])).left(2)
 		return "w|%d|%s|%s|%d" % [lab.office, dcs, lab.has_fab, int(lab.rival["count"]) / 3]
 	var room: Dictionary = ROOMS[lab.office]
 	return "o|%d|%d|%d|%d" % [lab.office, mini(lab.staff.size(), room["max_desks"]), _rack_count(), lab.office_upgrades.size()]
@@ -601,6 +610,8 @@ func _screen_glow(pos: Vector3) -> void:
 
 func _world_nature_and_traffic() -> void:
 	var occupied: Array = [LAB_POS, HELIX_POS, FAB_POS]
+	for pl in D.PLOTS:
+		occupied.append(Vector3(float(pl["pos"][0]), 0, float(pl["pos"][1])))
 	for b in world.get_children():
 		if b is Node3D and b.scale.x >= 1.0 and b.position.y == 0.0:
 			occupied.append(b.position)
@@ -709,6 +720,31 @@ func _face(node: Node3D, a: Vector3, b: Vector3) -> void:
 	var dvec := b - a
 	if dvec.length() > 0.01:
 		node.rotation.y = atan2(dvec.x, dvec.z)
+
+
+## Grundstück unter einem Bodenpunkt ("" = keins). margin vergrößert die Fläche.
+func plot_at(pos: Vector3, margin := 0.0) -> String:
+	var half := D.PLOT_SIZE / 2.0 + margin
+	for pl in D.PLOTS:
+		if absf(pos.x - float(pl["pos"][0])) <= half and absf(pos.z - float(pl["pos"][1])) <= half:
+			return pl["id"]
+	return ""
+
+
+## Brachfläche: Boden, bei Verkauf mit Bauzaun
+func _lot(pos: Vector3, col: Color, fence: bool) -> void:
+	var sz := D.PLOT_SIZE
+	_box(pos + Vector3(0, 0.01, 0), Vector3(sz, 0.02, sz), col, 0.0, 0.95)
+	if fence:
+		var fc := Color("e8e2d6")
+		for side in [[Vector3(0, 0.12, sz / 2.0), Vector3(sz, 0.2, 0.03)], [Vector3(0, 0.12, -sz / 2.0), Vector3(sz, 0.2, 0.03)],
+				[Vector3(sz / 2.0, 0.12, 0), Vector3(0.03, 0.2, sz)], [Vector3(-sz / 2.0, 0.12, 0), Vector3(0.03, 0.2, sz)]]:
+			_box(pos + side[0], side[1], fc, 0.0, 0.8)
+		for c in [Vector3(-1, 0, -1), Vector3(1, 0, -1), Vector3(-1, 0, 1), Vector3(1, 0, 1)]:
+			_box(pos + c * (sz / 2.0) + Vector3(0, 0.15, 0), Vector3(0.07, 0.3, 0.07), Color("e0752e"), 0.0, 0.7)
+	else:
+		for c in [Vector3(-0.6, 0, 0.6), Vector3(0.6, 0, -0.6), Vector3(0.7, 0, 0.7)]:
+			_box(pos + c + Vector3(0, 0.08, 0), Vector3(0.1, 0.16, 0.1), Color("f08a24"), 0.0, 0.6)
 
 
 ## Sprite steigt auf und verblasst
@@ -824,20 +860,55 @@ func _build_world() -> void:
 	_place_from(CITY, lb[0], LAB_POS, 45.0, Vector3.ONE * float(lb[1]))
 	_label3d("Dein Labor", LAB_POS + Vector3(0, 0.15, 2.0), Color("6fb6ff"))
 	money_anchor = LAB_POS + Vector3(0, 3.0, 0)
-	# Rechenzentren
-	var slots := [Vector3(3.5, 0, -3), Vector3(7, 0, -3), Vector3(10.5, 0, -3), Vector3(3.5, 0, -7), Vector3(7, 0, -7), Vector3(10.5, 0, -7),
-		Vector3(3.5, 0, -10.5), Vector3(7, 0, -10.5), Vector3(10.5, 0, -10.5)]
-	for i in range(mini(lab.datacenters.size(), slots.size())):
-		var dc: Dictionary = lab.datacenters[i]
-		var b: Array = DC_BUILDINGS[dc["type"]]
-		_place_from(CITY, b[0], slots[i], 0.0, Vector3.ONE * float(b[1]))
-		_label3d(_find_loc(dc["loc"]), slots[i] + Vector3(0, 0.15, 1.5), Color("a0e8b0"))
-		for l in range(2):
-			_add_rack(slots[i] + Vector3(-0.5 + l * 0.6, 0, 1.0))
-	# Chipfabrik
-	if lab.has_fab:
-		_place_from(CITY, "building-m", FAB_POS, 0.0, Vector3.ONE * 1.6)
-		_label3d("Chipfabrik", FAB_POS + Vector3(0, 0.15, 1.8), Color("ffc66b"))
+	# Grundstücke: zu verkaufen / eigen & leer / Rechenzentrum / Fabrik
+	var dc_by_plot := {}
+	var loose := []
+	for dc in lab.datacenters:
+		if String(dc.get("plot", "")) != "":
+			dc_by_plot[dc["plot"]] = dc
+		else:
+			loose.append(dc)   # alte Spielstände ohne Grundstück
+	for pl in D.PLOTS:
+		var pos := Vector3(float(pl["pos"][0]), 0, float(pl["pos"][1]))
+		var st: String = lab.plot_state(pl["id"])
+		if st in ["locked", "for_sale"] and not loose.is_empty():
+			dc_by_plot[pl["id"]] = loose.pop_front()
+			st = "dc"
+		var region := _find_loc(pl["loc"])
+		match st:
+			"for_sale":
+				_lot(pos, Color("8b7152"), true)
+				_label3d("%s
+zu verkaufen · %s" % [pl["name"], lab.fmt_money(lab.plot_price(pl["id"]))], pos + Vector3(0, 0.3, 0), Color("ffe08a"), 0.55)
+			"empty":
+				_lot(pos, Color("a3a5a8"), false)
+				_label3d("Dein Grundstück · %s
+klicken zum Bauen" % region, pos + Vector3(0, 0.3, 0), Color("9fd0ff"), 0.55)
+			"dc":
+				var dc: Dictionary = dc_by_plot.get(pl["id"], {})
+				var b: Array = DC_BUILDINGS[dc.get("type", "colo")]
+				_place_from(CITY, b[0], pos, 0.0, Vector3.ONE * float(b[1]))
+				_label3d(region, pos + Vector3(0, 0.15, 1.5), Color("a0e8b0"), 0.7)
+				for l in range(2):
+					_add_rack(pos + Vector3(-0.5 + l * 0.6, 0, 1.0))
+			"fab":
+				_place_from(CITY, "building-m", pos, 0.0, Vector3.ONE * 1.6)
+				_label3d("Chipfabrik", pos + Vector3(0, 0.15, 1.8), Color("ffc66b"), 0.8)
+	# Hover-Rahmen für Grundstücke
+	plot_highlight = MeshInstance3D.new()
+	var hm := BoxMesh.new()
+	hm.size = Vector3(D.PLOT_SIZE + 0.2, 0.04, D.PLOT_SIZE + 0.2)
+	plot_highlight.mesh = hm
+	var hmat := StandardMaterial3D.new()
+	hmat.albedo_color = Color(1.0, 0.85, 0.3, 0.35)
+	hmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	hmat.emission_enabled = true
+	hmat.emission = Color(1.0, 0.8, 0.3)
+	hmat.emission_energy_multiplier = 0.6
+	hmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	plot_highlight.material_override = hmat
+	plot_highlight.visible = false
+	world.add_child(plot_highlight)
 	# Konkurrenz: Helix wächst mit jedem Modell
 	var hs := 1.6 + minf(int(lab.rival["count"]) * 0.08, 1.4)
 	_place_from(CITY, "building-skyscraper-b", HELIX_POS, 0.0, Vector3.ONE * hs)
@@ -850,7 +921,7 @@ func _build_world() -> void:
 		var p := Vector3(rng.randf_range(-14, 14), 0, rng.randf_range(-14, 14))
 		if absf(p.x) < 1.5 or absf(p.z) < 1.5:
 			continue
-		if p.distance_to(LAB_POS) < 3.5 or p.distance_to(HELIX_POS) < 3.0 or (p.x > 1.5 and p.x < 12.5 and p.z < -1.5 and p.z > -12.5) or p.distance_to(FAB_POS) < 3.0 or (p.x > 3.0 and p.z > 3.0):
+		if p.distance_to(LAB_POS) < 3.5 or p.distance_to(HELIX_POS) < 3.0 or (p.x > 3.0 and p.z > 3.0) or plot_at(p, 2.0) != "":
 			continue
 		_place_from(CITY, fill[rng.randi() % fill.size()], p, rng.randf_range(0, 360), Vector3.ONE * rng.randf_range(1.0, 1.6))
 	cam_center = Vector3(-1.0, 0, -2.0)
@@ -866,11 +937,11 @@ func _find_loc(id: String) -> String:
 	return id
 
 
-func _label3d(text: String, pos: Vector3, col: Color) -> void:
+func _label3d(text: String, pos: Vector3, col: Color, scale := 1.0) -> void:
 	var l := Label3D.new()
 	l.text = text
 	l.font_size = 96
-	l.pixel_size = 0.006
+	l.pixel_size = 0.006 * scale
 	l.outline_modulate = Color(0, 0, 0, 0.85)
 	l.modulate = col
 	l.outline_size = 16

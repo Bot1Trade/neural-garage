@@ -45,10 +45,35 @@ const DATACENTERS := [
 	{"id": "hyper", "name": "Hyperscale-Campus", "slots": 131072, "cost": 50000000.0, "base": 30000.0, "year": 2023, "desc": "Strombedarf einer Kleinstadt. Eigener Netzanschluss."},
 ]
 const LOCATIONS := [
-	{"id": "fra", "name": "Frankfurt", "power": 1.3, "build": 1.0, "desc": "Teurer Strom, aber nah dran."},
-	{"id": "tex", "name": "Texas", "power": 0.85, "build": 0.9, "desc": "Billiger Strom und Land. Heiß – Kühlung lohnt sich."},
-	{"id": "isl", "name": "Island", "power": 0.55, "build": 1.3, "desc": "Geothermie und kalte Luft. Bau teurer, Betrieb sehr günstig."},
+	{"id": "fra", "name": "Innenstadt", "power": 1.3, "build": 1.0, "desc": "Teurer Strom, aber kurze Wege."},
+	{"id": "tex", "name": "Industriegebiet", "power": 0.85, "build": 0.9, "desc": "Günstiger Strom und günstiges Bauen."},
+	{"id": "isl", "name": "Grüne Energie", "power": 0.55, "build": 1.3, "desc": "Wind- und Solarstrom: Bau teurer, Betrieb sehr günstig."},
 ]
+
+## Grundstücke auf der Weltkarte: kaufen, dann Rechenzentrum oder Chipfabrik darauf bauen.
+## pos = [x, z] in der Weltansicht, loc = Gegend (Strompreis/Baukosten aus LOCATIONS)
+const PLOTS := [
+	{"id": "p1", "name": "Gewerbehof Mitte", "loc": "fra", "pos": [3.5, -3.0], "price": 200000.0, "year": 2018},
+	{"id": "p2", "name": "Altes Postgelände", "loc": "fra", "pos": [7.0, -3.0], "price": 260000.0, "year": 2018},
+	{"id": "p3", "name": "Industriegebiet Nord", "loc": "tex", "pos": [3.5, -7.0], "price": 160000.0, "year": 2018},
+	{"id": "p4", "name": "Hafenspeicher", "loc": "tex", "pos": [7.0, -7.0], "price": 220000.0, "year": 2019},
+	{"id": "p5", "name": "Logistikpark Ost", "loc": "tex", "pos": [10.5, -3.0], "price": 280000.0, "year": 2020},
+	{"id": "p6", "name": "Windpark-Gelände", "loc": "isl", "pos": [10.5, -7.0], "price": 450000.0, "year": 2020},
+	{"id": "p7", "name": "Solarfeld Süd", "loc": "isl", "pos": [10.5, -10.5], "price": 600000.0, "year": 2021},
+	{"id": "p8", "name": "Brache am Fluss", "loc": "tex", "pos": [7.0, -10.5], "price": 350000.0, "year": 2021},
+	{"id": "p9", "name": "Technologiepark", "loc": "fra", "pos": [3.5, -10.5], "price": 900000.0, "year": 2022},
+	{"id": "p10", "name": "Werksgelände Süd", "loc": "tex", "pos": [5.0, 6.0], "price": 1500000.0, "year": 2022},
+	{"id": "p11", "name": "Bahngelände West", "loc": "isl", "pos": [-8.0, -3.5], "price": 2500000.0, "year": 2023},
+]
+const PLOT_SIZE := 2.8
+
+## Kategorien im Kassenbuch (Finanz-Übersicht)
+const LEDGER_NAMES := {
+	"api": "API-Umsatz", "grant": "Forschungszuschüsse", "invest": "Investoren", "reward": "Ziel-Prämien",
+	"salary": "Gehälter", "rent": "GPU-Miete", "dc": "Rechenzentren (Strom)", "data": "Trainingsdaten",
+	"hire": "Einstellungen & Abfindungen", "hardware": "Hardware-Kauf", "building": "Büros, Grundstücke & Bau",
+	"chips": "Chip-Entwicklung", "fines": "Strafen, Klagen, Lobby", "other": "Sonstiges",
+}
 const DC_UPGRADES := [
 	{"id": "cooling", "name": "Flüssigkühlung", "cost": 0.25, "power": 0.7, "desc": "Strom −30 %"},
 	{"id": "solar", "name": "Solarpark", "cost": 0.4, "power": 0.6, "rep": 3.0, "desc": "Strom −40 %, +3 Reputation"},
