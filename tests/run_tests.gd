@@ -31,6 +31,7 @@ func _init() -> void:
 	test_hardware()
 	test_market()
 	test_ads_investors_plants()
+	test_negotiation()
 	print("Tests: %d ok, %d fehlgeschlagen" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 
@@ -359,6 +360,36 @@ func test_ads_investors_plants() -> void:
 	check(lab.build_plant("solarpark", "p3") == "", "Solarpark bauen")
 	check(lab.plot_state("p3") == "plant" and lab.energy_output() > 0.0, "Kraftwerk liefert Strom")
 	check(lab._energy_credit(100.0) > 100.0, "Überschuss wird verkauft")
+
+func test_negotiation() -> void:
+	var lab := new_lab()
+	lab.money = 50000000.0
+	lab._init_companies()
+	check(lab.start_negotiation("nova") == "", "Verhandlung starten")
+	var reserve: float = lab.negotiation("nova")["reserve"]
+	check(reserve > lab.remaining_value("nova"), "Mindestpreis über dem Restwert")
+	var r: Dictionary = lab.make_offer("nova", reserve * 0.5, 0.0)
+	check(r["result"] == "insulted" and int(lab.negotiation("nova")["patience"]) == 1, "Lowball verärgert (Geduld −2)")
+	check(float(r["counter"]) >= reserve, "Gegenangebot mindestens Mindestpreis")
+	var m0: float = lab.money
+	r = lab.accept_counter("nova")
+	check(r["result"] == "accept" and lab.stake("nova") == 100.0, "Gegenangebot angenommen → übernommen")
+	check(lab.money < m0 and lab.absorbed_labs() == 1, "Bezahlt, Labor eingegliedert")
+	# Bezahlung mit Aktien
+	var eq0: float = lab.equity
+	lab.start_negotiation("pixelfunk")
+	var res2: float = lab.negotiation("pixelfunk")["reserve"]
+	var stock: float = minf(lab.max_stock_offer(), 10.0)
+	var cash: float = maxf(0.0, res2 - lab.offer_worth(0.0, stock)) * 1.01
+	r = lab.make_offer("pixelfunk", cash, stock)
+	check(r["result"] == "accept" and lab.equity < eq0, "Übernahme teils mit eigenen Anteilen")
+	# Geduld aufbrauchen
+	lab.start_negotiation("kestrel")
+	var res3: float = lab.negotiation("kestrel")["reserve"]
+	for i in range(3):
+		r = lab.make_offer("kestrel", res3 * 0.85, 0.0)
+	check(r["result"] == "walkaway", "Nach 3 zu niedrigen Angeboten Abbruch")
+	check(lab.can_negotiate("kestrel") != "", "Danach ein Jahr Sperre")
 
 func test_bankrupt() -> void:
 	var lab := new_lab()

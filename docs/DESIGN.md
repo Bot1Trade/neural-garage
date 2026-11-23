@@ -200,3 +200,4 @@ Vorbilder: Game Dev Tycoon (Personal, Forschungsbaum), Mad Games Tycoon 2 (Konku
 - **Investoren:** Roadshow selbst starten, zufällige Angebote, spätes Übernahmeangebot (Ende „Verkauft“).
 - **Bedienung:** Forschungsbaum, 3 Speicherplätze + Autosave (F5), Tempo 1×/2×/5×.
 - **Länger:** Reasoning 2024, Agenten 2027, Helix-AGI frühestens 2030, Ende 2036. Bot gewinnt Median 2027.
+- **Übernahme-Verhandlung** (Firmen → „Übernahme verhandeln“): geheimer Mindestpreis (1,15–1,45× Restwert, Helix +0,35; günstiger mit eigenem Anteil und Ruf), 3 Herzen Geduld. Angebot aus Bargeld + eigenen Anteilen (max. 25 %, mit 15 % Abschlag bewertet). <75 % → verärgert (−2), sonst Gegenangebot (−1), ≥ Mindestpreis → Übernahme. Abbruch = 1 Jahr Sperre.

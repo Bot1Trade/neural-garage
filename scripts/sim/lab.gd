@@ -7,7 +7,7 @@ const D = preload("res://scripts/sim/data.gd")
 const SAVE_KEYS := ["day", "money", "total_revenue", "reputation", "equity", "office", "staff", "candidates",
 	"gpus", "techs", "rp", "models", "training", "data_unlocked", "flags", "cooldowns", "rival", "goal_index",
 	"investor_stage", "investor_next_day", "broke_days", "best_rating", "best_q", "gpu_price_mult",
-	"gpu_shortage_days", "ending", "news", "news_total", "ledger_days", "ledger_today", "plots", "fab_plot", "office_hw", "companies", "last_feedback", "ledger_year", "ledger_last_year", "money_hist", "office_upgrades", "datacenters", "chip_version", "chip_project", "custom_chip", "has_fab", "event_queue", "next_model_id", "era_index"]
+	"gpu_shortage_days", "ending", "news", "news_total", "ledger_days", "ledger_today", "plots", "fab_plot", "office_hw", "companies", "negotiations", "last_feedback", "ledger_year", "ledger_last_year", "money_hist", "office_upgrades", "datacenters", "chip_version", "chip_project", "custom_chip", "has_fab", "event_queue", "next_model_id", "era_index"]
 const INT_KEYS := ["day", "office", "goal_index", "investor_stage", "investor_next_day", "broke_days",
 	"gpu_shortage_days", "next_model_id", "era_index", "news_total", "chip_version"]
 
@@ -53,6 +53,7 @@ var plots: Dictionary = {}            # Grundstück-ID -> "" (leer) | "dc" | "fa
 var fab_plot: String = ""
 var office_hw: Array = []              # gekaufte GPUs im Büro
 var companies: Dictionary = {}         # Firmen-ID -> {value, stake}
+var negotiations: Dictionary = {}      # Firmen-ID -> {reserve, patience, round, counter, cooldown}
 var last_feedback: Array = []         # letztes Kritik-Feedback (für den Berater)
 var ledger_days: Array = []          # letzte 30 Tage: [{kategorie: betrag}]
 var ledger_today: Dictionary = {}
@@ -1707,6 +1708,127 @@ func _step_market() -> void:
 	var div := daily_dividends()
 	if div > 0.0:
 		book("dividend", div)
+
+# ---- Übernahme-Verhandlungen
+# Gegenseite hat einen geheimen Mindestpreis (reserve) und begrenzte Geduld.
+# Bezahlt wird mit Bargeld und/oder eigenen Firmenanteilen (verwässert deinen Anteil).
+
+func remaining_value(id: String) -> float:
+	return company_value(id) * (100.0 - stake(id)) / 100.0
+
+func negotiation(id: String) -> Dictionary:
+	return negotiations.get(id, {})
+
+func can_negotiate(id: String) -> String:
+	_init_companies()
+	if company(id).is_empty():
+		return "Unbekannte Firma."
+	if stake(id) >= 100.0:
+		return "Gehört dir schon ganz."
+	var n := negotiation(id)
+	if int(n.get("cooldown", 0)) > day:
+		return "%s spricht erst ab %s wieder mit dir." % [company(id)["name"], _date_of(int(n["cooldown"]))]
+	return ""
+
+func start_negotiation(id: String) -> String:
+	var err := can_negotiate(id)
+	if err != "":
+		return err
+	var n := negotiation(id)
+	if n.has("reserve") and int(n.get("patience", 0)) > 0:
+		return ""   # läuft schon
+	var premium := rng.randf_range(1.15, 1.45)
+	premium -= 0.06 * stake(id) / 25.0                 # wer schon viel hält, verhandelt leichter
+	premium -= reputation / 100.0 * 0.08                 # guter Ruf hilft
+	if id == "helix":
+		premium += 0.35                                   # der Rivale verkauft ungern
+	negotiations[id] = {"reserve": remaining_value(id) * maxf(1.02, premium), "patience": 3, "round": 0, "counter": 0.0, "cooldown": 0}
+	revision += 1
+	return ""
+
+## Was ein Angebot für die Gegenseite wert ist (Aktien werden mit Abschlag bewertet)
+func offer_worth(cash: float, stock_pct: float) -> float:
+	return cash + valuation() * stock_pct / 100.0 * 0.85
+
+func max_stock_offer() -> float:
+	return clampf(equity - 15.0, 0.0, 25.0)
+
+## Ergebnis: {result: accept|counter|insulted|walkaway|error, text, counter}
+func make_offer(id: String, cash: float, stock_pct: float) -> Dictionary:
+	var n := negotiation(id)
+	if not n.has("reserve") or int(n["patience"]) <= 0:
+		return {"result": "error", "text": "Keine laufende Verhandlung."}
+	cash = maxf(0.0, cash)
+	stock_pct = clampf(stock_pct, 0.0, max_stock_offer())
+	if cash > money:
+		return {"result": "error", "text": "So viel Geld hast du nicht."}
+	n["round"] = int(n["round"]) + 1
+	n["reserve"] = float(n["reserve"]) * (company_value(id) / maxf(1.0, float(n.get("ref_value", company_value(id)))))
+	n["ref_value"] = company_value(id)
+	var reserve := float(n["reserve"])
+	var worth := offer_worth(cash, stock_pct)
+	var name: String = company(id)["name"]
+	if worth >= reserve:
+		_complete_takeover(id, cash, stock_pct)
+		return {"result": "accept", "text": "%s nimmt an! Die Firma gehört jetzt dir." % name}
+	var ratio := worth / reserve
+	if ratio < 0.75:
+		n["patience"] = int(n["patience"]) - 2
+		n["counter"] = reserve * rng.randf_range(1.12, 1.2)
+		if int(n["patience"]) <= 0:
+			return _walk_away(id, "Das ist eine Beleidigung. %s bricht die Gespräche ab." % name)
+		return {"result": "insulted", "counter": n["counter"],
+			"text": "„Das ist nicht ernst gemeint.“ %s ist verärgert und verlangt %s." % [name, fmt_money(n["counter"])]}
+	n["patience"] = int(n["patience"]) - 1
+	# Gegenangebot: zwischen deinem Angebot und dem Mindestpreis, mit Aufschlag
+	n["counter"] = maxf(reserve, worth + (reserve - worth) * 0.5) * rng.randf_range(1.03, 1.08)
+	if int(n["patience"]) <= 0:
+		return _walk_away(id, "%s hat genug verhandelt und steigt aus." % name)
+	return {"result": "counter", "counter": n["counter"],
+		"text": "%s lehnt ab, macht aber ein Gegenangebot: %s in bar." % [name, fmt_money(n["counter"])]}
+
+func accept_counter(id: String) -> Dictionary:
+	var n := negotiation(id)
+	var c := float(n.get("counter", 0.0))
+	if c <= 0.0 or int(n.get("patience", 0)) <= 0:
+		return {"result": "error", "text": "Kein Gegenangebot offen."}
+	if money < c:
+		return {"result": "error", "text": "Dafür fehlt dir das Geld (%s)." % fmt_money(c)}
+	_complete_takeover(id, c, 0.0)
+	return {"result": "accept", "text": "Handschlag! %s gehört jetzt dir." % company(id)["name"]}
+
+func cancel_negotiation(id: String) -> void:
+	if negotiations.has(id):
+		negotiations[id] = {"cooldown": day + 60}
+		revision += 1
+
+func _walk_away(id: String, text: String) -> Dictionary:
+	negotiations[id] = {"cooldown": day + 365}
+	revision += 1
+	return {"result": "walkaway", "text": text + " Neue Gespräche frühestens in einem Jahr."}
+
+func _complete_takeover(id: String, cash: float, stock_pct: float) -> void:
+	if cash > 0.0:
+		book("stake", -cash)
+	if stock_pct > 0.0:
+		equity -= equity * stock_pct / 100.0
+	var before := stake(id)
+	companies[id]["stake"] = 100.0
+	negotiations.erase(id)
+	_news("[color=#7fd]Übernahme:[/color] [b]%s[/b] gehört jetzt komplett dir (%s%s)." % [company(id)["name"], fmt_money(cash), (" + %.1f %% Anteile" % stock_pct) if stock_pct > 0.0 else ""])
+	_check_takeover(id, before)
+	if company(id)["kind"] == "ai" and id == "helix":
+		flags["helix_controlled"] = true
+	fx.append("goal")
+	revision += 1
+
+func _date_of(d: int) -> String:
+	var keep := day
+	day = d
+	var s := date_string()
+	day = keep
+	return s
+
 
 # ---- Werbung
 

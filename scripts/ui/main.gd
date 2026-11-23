@@ -85,6 +85,7 @@ var ui_ready := false
 var sound_popup: PopupPanel
 var gfx_popup: PopupPanel
 var save_popup: PopupPanel
+var nego_popup: PopupPanel
 var last_slot := 1
 var plot_popup: PopupPanel
 var focus_sliders := {}
@@ -1191,11 +1192,123 @@ func _build_market() -> void:
 		row.add_child(bb)
 		if st > 0.0:
 			row.add_child(_button("−%d %%: +%s" % [int(D.STAKE_STEP), lab.fmt_money(lab.stake_sell_price(id))], func(): _show_error(lab.sell_stake(id))))
+		if st < 100.0:
+			var nb := _button("Übernahme verhandeln" if lab.negotiation(id).get("reserve", 0.0) == 0.0 else "Verhandlung fortsetzen", func(): _open_negotiation(id),
+				"Komplett kaufen – Preis verhandeln, mit Bargeld und/oder eigenen Anteilen.")
+			if lab.can_negotiate(id) != "":
+				nb.disabled = true
+				nb.tooltip_text = lab.can_negotiate(id)
+			nb.modulate = C_WARN
+			row.add_child(nb)
 		v.add_child(row)
 		tab_market.add_child(p)
 
 
 	_fit_texts(tab_market)
+
+## Verhandlungsfenster für eine Komplettübernahme
+func _open_negotiation(id: String, reply := {}) -> void:
+	var err: String = lab.start_negotiation(id)
+	if err != "":
+		_show_error(err)
+		return
+	if nego_popup == null:
+		nego_popup = PopupPanel.new()
+		nego_popup.add_theme_stylebox_override("panel", _hud_style(Color(0.09, 0.1, 0.13, 0.98), 10))
+		add_child(nego_popup)
+	for c in nego_popup.get_children():
+		nego_popup.remove_child(c)
+		c.queue_free()
+	var c: Dictionary = lab.company(id)
+	var n: Dictionary = lab.negotiation(id)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 10)
+	v.custom_minimum_size.x = 560
+	nego_popup.add_child(v)
+	v.add_child(_label("Übernahme: %s" % c["name"], 22, C_ACCENT))
+	v.add_child(_label("Firmenwert %s · du hältst %d %% · offener Rest %s" % [lab.fmt_money(lab.company_value(id)), int(lab.stake(id)), lab.fmt_money(lab.remaining_value(id))], 14, C_DIM))
+	# Geduld als Symbole
+	var ph := HBoxContainer.new()
+	ph.add_child(_label("Geduld der Gegenseite:", 14))
+	for i in range(3):
+		var ic := _icon_rect("emotes/emote_heart", 22)
+		if i >= int(n.get("patience", 0)):
+			ic.modulate = Color(1, 1, 1, 0.25)
+		ph.add_child(ic)
+	v.add_child(ph)
+	if not reply.is_empty():
+		var col: Color = {"accept": C_GOOD, "counter": C_WARN, "insulted": C_BAD, "walkaway": C_BAD}.get(reply["result"], C_TEXT)
+		v.add_child(_wrap(reply["text"], col))
+		if reply["result"] in ["accept", "walkaway"]:
+			v.add_child(_button("Schließen", func(): nego_popup.hide(); built_rev = -1))
+			_popup_center(nego_popup)
+			return
+	else:
+		v.add_child(_wrap("Mach ein Angebot. Zu wenig verärgert die Gegenseite (−2 Geduld), knapp daneben bringt ein Gegenangebot (−1 Geduld). Eigene Anteile werden mit Abschlag bewertet.", C_DIM))
+	# Angebot zusammenstellen
+	var start_cash: float = minf(lab.money, float(n.get("counter", lab.remaining_value(id) * 1.1)) * 0.92)
+	var g := GridContainer.new()
+	g.columns = 3
+	g.add_theme_constant_override("h_separation", 10)
+	v.add_child(g)
+	g.add_child(_label("Bargeld", 14, C_DIM))
+	var cs := HSlider.new()
+	cs.min_value = 0
+	cs.max_value = maxf(1.0, lab.money)
+	cs.step = maxf(1.0, lab.money / 200.0)
+	cs.value = start_cash
+	cs.custom_minimum_size.x = 300
+	g.add_child(cs)
+	var cl := _label("", 14)
+	cl.custom_minimum_size.x = 120
+	g.add_child(cl)
+	g.add_child(_label("Eigene Anteile", 14, C_DIM))
+	var ss := HSlider.new()
+	ss.min_value = 0
+	ss.max_value = maxf(0.0, lab.max_stock_offer())
+	ss.step = 0.5
+	ss.editable = lab.max_stock_offer() > 0.0
+	ss.custom_minimum_size.x = 300
+	g.add_child(ss)
+	var sl := _label("", 14)
+	g.add_child(sl)
+	var total := _label("", 16, C_ACCENT)
+	v.add_child(total)
+	var upd := func(_x = 0.0):
+		cl.text = lab.fmt_money(cs.value)
+		sl.text = "%.1f %% (~%s)" % [ss.value, lab.fmt_money(lab.valuation() * ss.value / 100.0 * 0.85)]
+		total.text = "Angebot gesamt: %s" % lab.fmt_money(lab.offer_worth(cs.value, ss.value))
+	cs.value_changed.connect(upd)
+	ss.value_changed.connect(upd)
+	upd.call()
+	var row := HFlowContainer.new()
+	row.add_theme_constant_override("h_separation", 8)
+	row.add_child(_button("Angebot senden", func():
+		var r: Dictionary = lab.make_offer(id, cs.value, ss.value)
+		audio.play("confirm" if r["result"] == "accept" else ("error" if r["result"] in ["insulted", "walkaway", "error"] else "click"))
+		if r["result"] == "error":
+			_show_error(r["text"])
+			return
+		_open_negotiation(id, r)))
+	if float(n.get("counter", 0.0)) > 0.0:
+		var cb := _button("Gegenangebot annehmen: %s" % lab.fmt_money(n["counter"]), func():
+			var r: Dictionary = lab.accept_counter(id)
+			if r["result"] == "error":
+				_show_error(r["text"])
+				return
+			audio.play("confirm")
+			_open_negotiation(id, r))
+		cb.disabled = lab.money < float(n["counter"])
+		row.add_child(cb)
+	row.add_child(_button("Abbrechen", func(): lab.cancel_negotiation(id); nego_popup.hide(); built_rev = -1, "Gespräche beenden (60 Tage Pause)"))
+	v.add_child(row)
+	_popup_center(nego_popup)
+
+
+func _popup_center(p: PopupPanel) -> void:
+	var vs := get_viewport().get_visible_rect().size
+	p.popup(Rect2i(Vector2i(vs / 2.0 - Vector2(300, 220)), Vector2i(600, 10)))
+
 
 func _build_finance() -> void:
 	_clear(tab_finance)
