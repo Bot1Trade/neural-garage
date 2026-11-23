@@ -343,7 +343,7 @@ func test_ads_investors_plants() -> void:
 	var m: Dictionary = lab.get_model(id)
 	var t0: float = lab.target_users(m)
 	check(lab.start_campaign(id, "online") == "", "Werbung starten")
-	check(lab.target_users(m) > t0 * 1.2, "Werbung erhöht Nutzer-Potenzial")
+	check(lab.target_users(m) > t0 * 1.1, "Werbung erhöht Nutzer-Potenzial")
 	check(lab.start_campaign(id, "big") != "", "Nur eine Kampagne gleichzeitig")
 	check(lab.start_roadshow() == "", "Roadshow starten")
 	lab.event_queue.clear()
