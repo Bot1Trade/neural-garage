@@ -10,8 +10,9 @@ const Tutorial = preload("res://scripts/ui/tutorial.gd")
 const Audio = preload("res://scripts/ui/audio.gd")
 const Settings = preload("res://scripts/ui/settings.gd")
 
-const SAVE_PATH := "user://save.json"
-const SPEEDS := [0.0, 0.6, 0.25, 0.08]     # Sekunden pro Spieltag
+const SAVE_PATH := "user://save.json"          # alter Einzel-Spielstand
+const AUTOSAVE_PATH := "user://autosave.json"
+const SPEEDS := [0.0, 0.5, 0.25, 0.1]      # Sekunden pro Spieltag: Pause, 1×, 2×, 5×
 const TOOLS := [
 	{"icon": "icons/target", "title": "Modell", "tip": "Modell entwerfen & trainieren (Taste M)"},
 	{"icon": "icons/multiplayer", "title": "Team", "tip": "Team & Bewerbungen"},
@@ -80,6 +81,8 @@ var audio: Node
 var ui_ready := false
 var sound_popup: PopupPanel
 var gfx_popup: PopupPanel
+var save_popup: PopupPanel
+var last_slot := 1
 var plot_popup: PopupPanel
 var focus_sliders := {}
 var focus_info: Label
@@ -93,6 +96,7 @@ var train_bar: ProgressBar
 var train_label: Label
 var research_rp_label: Label
 var research_btns := []
+var research_sel := ""
 var product_labels := []
 var modal: Control
 var modal_title: Label
@@ -172,6 +176,8 @@ func _unhandled_input(e: InputEvent) -> void:
 				_set_speed(2)
 			KEY_3:
 				_set_speed(3)
+			KEY_F5:
+				_save(false)
 			KEY_F11:
 				gfx["fullscreen"] = not bool(gfx["fullscreen"])
 				_apply_gfx()
@@ -249,7 +255,8 @@ func _refresh() -> void:
 	if research_rp_label != null:
 		research_rp_label.text = "Forschungspunkte: %.0f  (+%.2f pro Tag)" % [lab.rp, lab.rp_per_day()]
 	for rb in research_btns:
-		rb["btn"].disabled = lab.rp < rb["cost"]
+		if not rb.has("tree"):
+			rb["btn"].disabled = lab.rp < rb["cost"]
 	if drawer.visible and tabs.current_tab == 8 and lab.day != finance_day:
 		_build_finance()
 	if drawer.visible and tabs.current_tab == 9 and (lab.day - advisor_day >= 3 or lab.revision != built_rev or advisor_day < 0):
@@ -260,7 +267,8 @@ func _refresh() -> void:
 	for pl in product_labels:
 		var m: Dictionary = lab.get_model(pl["id"])
 		if not m.is_empty() and m["status"] == "api":
-			pl["label"].text = "%s/Tag" % lab.fmt_money(lab.model_revenue(m))
+			pl["label"].text = "%s Nutzer (%.1f %%)
+%s/Tag" % [_short(float(m.get("users", 0.0))), lab.popularity(m), lab.fmt_money(lab.model_revenue(m))]
 
 
 # ================================================================ Tabs
@@ -493,6 +501,12 @@ func _build_team() -> void:
 		rl.mouse_filter = Control.MOUSE_FILTER_STOP
 		roles.add_child(rl)
 	tab_team.add_child(roles)
+	if lab.managed():
+		tab_team.add_child(_label("Management betreut das Team (%d Plätze): Urlaub und Gehaltswünsche laufen automatisch." % lab.manager_capacity(), 14, C_GOOD))
+	elif lab.managers().is_empty():
+		tab_team.add_child(_label("Kein Management: Urlaub und Gehaltswünsche regelst du selbst. Ab ~6 Leuten lohnt sich ein Manager.", 14, C_WARN))
+	else:
+		tab_team.add_child(_label("Management überlastet (%d Plätze für %d Leute) – weiteren Manager einstellen." % [lab.manager_capacity(), lab.staff.size()], 14, C_WARN))
 	tab_team.add_child(_wrap("Wirkung: Qualität ×%.2f · Training ×%.2f · Risiko −%d %% · Umsatz ×%.2f · %.1f FP/Tag · Gehälter %s/Tag" % [
 		lab.team_quality(), lab.engineer_mult(), int(lab.safety_reduction() * 100), lab.sales_mult(), lab.rp_per_day(), lab.fmt_money(lab.daily_salaries())], C_DIM))
 	if full and lab.office < D.OFFICES.size() - 1:
@@ -513,18 +527,7 @@ func _build_team() -> void:
 	tab_team.add_child(HSeparator.new())
 	tab_team.add_child(_label("Dein Team (%d)" % lab.staff.size(), 18))
 	for i in range(lab.staff.size()):
-		var p: Dictionary = lab.staff[i]
-		var row := _person_row(p)
-		if i > 0:
-			var x := _icon_button("icons/cross", func(): lab.fire(i), "Entlassen – Abfindung: %s" % lab.fmt_money(float(p["salary"]) / 12.0), 26)
-			x.modulate = Color(1, 1, 1, 0.45)
-			x.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-			row.add_child(x)
-		else:
-			var sp := Control.new()
-			sp.custom_minimum_size.x = 26
-			row.add_child(sp)
-		tab_team.add_child(row)
+		tab_team.add_child(_staff_row(i))
 
 
 func _person_row(p: Dictionary) -> HBoxContainer:
@@ -563,71 +566,270 @@ func _person_row(p: Dictionary) -> HBoxContainer:
 	return row
 
 
+## Zeile für ein Teammitglied: Rolle · Name · Können · Energie · Stimmung · Gehalt · Urlaub · Entlassen
+func _staff_row(i: int) -> HBoxContainer:
+	var p: Dictionary = lab.staff[i]
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	var role: Dictionary = D.ROLES[p["role"]]
+	var rl := _label(role["name"], 14, role["color"])
+	rl.custom_minimum_size.x = 92
+	rl.tooltip_text = role["desc"]
+	rl.mouse_filter = Control.MOUSE_FILTER_STOP
+	row.add_child(rl)
+	var nl := _label(p["name"], 14)
+	nl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	nl.clip_text = true
+	nl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	nl.custom_minimum_size.x = 60
+	nl.tooltip_text = p["name"]
+	nl.mouse_filter = Control.MOUSE_FILTER_STOP
+	row.add_child(nl)
+	var sk := _label("K%d" % int(p["skill"]), 13, C_DIM)
+	sk.tooltip_text = "Können %d/10" % int(p["skill"])
+	sk.mouse_filter = Control.MOUSE_FILTER_STOP
+	sk.custom_minimum_size.x = 26
+	row.add_child(sk)
+	var vac := int(p.get("vacation", 0))
+	var energy := float(p.get("energy", 100.0))
+	var morale := float(p.get("morale", 70.0))
+	if vac > 0:
+		var vl := _label("Urlaub · %d T." % vac, 13, C_ACCENT)
+		vl.custom_minimum_size.x = 78
+		row.add_child(vl)
+	else:
+		var eb := ProgressBar.new()
+		eb.max_value = 100
+		eb.value = energy
+		eb.show_percentage = false
+		eb.custom_minimum_size = Vector2(54, 10)
+		eb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		eb.tooltip_text = "Energie %d %%%s" % [int(energy), " – braucht Urlaub!" if energy < 35.0 else ""]
+		var fill := StyleBoxFlat.new()
+		fill.bg_color = C_GOOD if energy >= 60.0 else (C_WARN if energy >= 35.0 else C_BAD)
+		fill.set_corner_radius_all(3)
+		eb.add_theme_stylebox_override("fill", fill)
+		row.add_child(eb)
+		var face := _icon_rect("emotes/" + ("emote_faceHappy" if morale >= 60.0 else ("emote_faceSad" if morale >= 35.0 else "emote_faceAngry")), 20)
+		face.tooltip_text = "Stimmung %d %%%s" % [int(morale), " – Kündigungsgefahr!" if morale < 25.0 else ""]
+		face.mouse_filter = Control.MOUSE_FILTER_STOP
+		row.add_child(face)
+	var sl := _label("%s/J." % lab.fmt_money(p["salary"]), 13, C_DIM)
+	sl.custom_minimum_size.x = 70
+	sl.tooltip_text = "Jahresgehalt"
+	sl.mouse_filter = Control.MOUSE_FILTER_STOP
+	row.add_child(sl)
+	var vb := _button("Urlaub", func(): _show_error(lab.send_vacation(i)), "In Urlaub schicken (%d Tage): Energie wieder voll, so lange keine Arbeit" % D.VACATION_DAYS)
+	vb.add_theme_font_size_override("font_size", 12)
+	vb.disabled = vac > 0
+	if energy < 35.0 and vac == 0:
+		vb.modulate = C_WARN
+	vb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(vb)
+	if i > 0:
+		var x := _icon_button("icons/cross", func(): lab.fire(i), "Entlassen – Abfindung: %s" % lab.fmt_money(float(p["salary"]) / 12.0), 22)
+		x.modulate = Color(1, 1, 1, 0.45)
+		x.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(x)
+	else:
+		var sp := Control.new()
+		sp.custom_minimum_size.x = 22
+		row.add_child(sp)
+	return row
+
+
 func _build_compute() -> void:
 	_clear(tab_compute)
 	var gen: int = lab.gpu_gen_now()
 	var cap: int = lab.office_data()["gpus"]
-	tab_compute.add_child(_label("GPUs mieten", 22, C_ACCENT))
-	tab_compute.add_child(_label("Leistung %.0f  ·  Miete %s/Tag  ·  Belegung %d/%d" % [lab.compute_power(), lab.fmt_money(lab.daily_gpu_cost()), lab.gpu_count(), cap], 16))
-	tab_compute.add_child(_label("Aktuell im Handel: GPU Gen %d  –  Leistung %.0f, Miete %s/Tag pro Stück" % [gen, lab.gpu_power(gen), lab.fmt_money(lab.gpu_cost(gen))], 16))
+	var free: int = cap - lab.gpu_count()
+	tab_compute.add_child(_label("Rechenleistung: %s" % _short(lab.compute_power()), 22, C_ACCENT))
+	if not lab.training.is_empty():
+		tab_compute.add_child(_label("Laufendes Training: noch ~%d Tage – mehr Leistung macht es schneller." % ceili(lab.training_days_left()), 14, C_WARN))
+	tab_compute.add_child(_label("Büro-Plätze: %d/%d  (gemietet %d · gekauft %d)" % [lab.gpu_count(), cap, lab.rented_count(), lab.hw_count(lab.office_hw)], 15))
+	tab_compute.add_child(_label("Im Handel: GPU Gen %d mit Leistung %.0f – neue Generation alle 2 Jahre (doppelte Leistung)." % [gen, lab.gpu_power(gen)], 14, C_DIM))
 	if lab.gpu_price_mult > 1.0:
-		tab_compute.add_child(_label("GPU-Knappheit! Mieten kosten gerade +80 %%  (noch %d Tage)" % lab.gpu_shortage_days, 16, C_BAD))
-	for g in lab.gpus:
-		var gg: int = int(g["gen"])
-		tab_compute.add_child(_label("   Gen %d: %d Stück  (je %.0f Leistung, %s/Tag)" % [gg, int(g["count"]), lab.gpu_power(gg), lab.fmt_money(lab.gpu_cost(gg))], 15, C_DIM))
-	var rent := HBoxContainer.new()
-	rent.add_child(_label("Mieten:", 15))
-	for n in [1, 5, 25, 100, 500, 2000]:
-		if n <= cap:
-			var b := _button("+%d" % n, func(): _show_error(lab.rent_gpus(n)), "Kostet %s/Tag" % lab.fmt_money(lab.gpu_cost(gen) * n))
-			b.disabled = lab.gpu_count() >= cap
-			rent.add_child(b)
-	tab_compute.add_child(rent)
-	var ret := HBoxContainer.new()
-	ret.add_child(_label("Zurückgeben (älteste zuerst):", 15))
-	for n in [1, 5, 25, 100, 500, 2000]:
-		if n <= cap:
-			var b := _button("−%d" % n, func(): lab.return_gpus(n))
-			b.disabled = lab.gpu_count() == 0
-			ret.add_child(b)
-	tab_compute.add_child(ret)
-	tab_compute.add_child(_wrap("Alle 2 Jahre kommt eine GPU-Generation mit doppelter Leistung. Alte GPUs zurückgeben und neue mieten spart Geld pro Leistung. Ein größeres Büro erlaubt mehr GPUs.", C_DIM))
+		tab_compute.add_child(_label("GPU-Knappheit! Miete und Kauf +80 %%  (noch %d Tage)" % lab.gpu_shortage_days, 15, C_BAD))
+	# Mieten
+	tab_compute.add_child(HSeparator.new())
+	tab_compute.add_child(_label("Mieten  ·  %s pro GPU und Tag" % lab.fmt_money(lab.gpu_cost(gen)), 17))
+	tab_compute.add_child(_label("Flexibel, kein Kapital nötig – auf Dauer aber teuer. Aktuell: %s/Tag" % lab.fmt_money(lab.daily_gpu_cost()), 13, C_DIM))
+	tab_compute.add_child(_amount_row("Mieten:", [1, 5, 25, 100, 500], cap, free, func(n): _show_error(lab.rent_gpus(n)), "+"))
+	if lab.rented_count() > 0:
+		tab_compute.add_child(_amount_row("Zurückgeben:", [1, 5, 25, 100, 500], cap, lab.rented_count(), func(n): lab.return_gpus(n), "−"))
+	# Kaufen
+	tab_compute.add_child(HSeparator.new())
+	var u: Dictionary = lab.hw_unit("market")
+	tab_compute.add_child(_label("Kaufen  ·  %s pro GPU, danach nur Strom (%s/Tag)" % [lab.fmt_money(u["price"]), lab.fmt_money(float(u["upkeep"]) * lab.office_power_mult())], 17))
+	tab_compute.add_child(_label("Lohnt sich nach ~%d Tagen gegenüber Miete. Nutzt sich ab – ab und zu warten." % int(float(u["price"]) / maxf(1.0, lab.gpu_cost(gen) - float(u["upkeep"]) * lab.office_power_mult())), 13, C_DIM))
+	tab_compute.add_child(_amount_row("Kaufen:", [1, 5, 25, 100, 500], cap, free, func(n): _show_error(lab.buy_office_hw("market", n)), "+"))
+	if not lab.custom_chip.is_empty():
+		var cu: Dictionary = lab.hw_unit("custom")
+		tab_compute.add_child(_label("Eigener Chip %s: Leistung %.0f für %s" % [cu["name"], cu["power"], lab.fmt_money(cu["price"])], 14, C_GOOD))
+		tab_compute.add_child(_amount_row("Kaufen:", [1, 5, 25, 100, 500], cap, free, func(n): _show_error(lab.buy_office_hw("custom", n)), "+"))
+	if lab.hw_count(lab.office_hw) > 0:
+		var cond: float = lab.hw_avg_cond(lab.office_hw)
+		tab_compute.add_child(_label("Eigene Büro-GPUs: %d Stück · Zustand %d %%%s" % [lab.hw_count(lab.office_hw), int(cond), " – Leistung sinkt!" if cond < 60.0 else ""], 15, C_BAD if cond < 60.0 else C_TEXT))
+		for h in lab.office_hw:
+			tab_compute.add_child(_label("   %s: %d Stück · %d %% · Wiederverkauf je %s" % [h["name"], int(h["count"]), int(float(h.get("cond", 100.0))), lab.fmt_money(lab.hw_resale(h))], 13, C_DIM))
+		var mrow := HFlowContainer.new()
+		mrow.add_theme_constant_override("h_separation", 8)
+		var mc: float = lab.hw_maint_cost(lab.office_hw)
+		var mb := _button("Warten: %s" % lab.fmt_money(mc), func(): _show_error(lab.maintain_office()), "Stellt den vollen Zustand wieder her. Mit Hardware-Labor automatisch und halb so teuer.")
+		mb.disabled = mc < 1.0
+		mrow.add_child(mb)
+		tab_compute.add_child(mrow)
+		tab_compute.add_child(_amount_row("Verkaufen:", [1, 5, 25, 100], cap, lab.hw_count(lab.office_hw), func(n): lab.sell_office_hw(n), "−"))
+	# Strom
+	tab_compute.add_child(HSeparator.new())
+	tab_compute.add_child(_label("Strom für eigene GPUs: %s/Tag  (Faktor ×%.2f)" % [lab.fmt_money(lab.daily_office_power()), lab.office_power_mult()], 17))
+	var srow := HFlowContainer.new()
+	srow.add_theme_constant_override("h_separation", 8)
+	for uid in ["solar", "battery"]:
+		var up: Dictionary = lab._find(D.OFFICE_UPGRADES, uid)
+		if lab.office_upgrades.has(uid):
+			srow.add_child(_label("✔ " + up["name"], 14, C_GOOD))
+		elif lab.office >= int(up["min_office"]):
+			var id: String = uid
+			srow.add_child(_button("%s: %s" % [up["name"], lab.fmt_money(up["cost"])], func(): _show_error(lab.buy_office_upgrade(id)), up["desc"]))
+		else:
+			srow.add_child(_label("%s ab %s" % [up["name"], D.OFFICES[int(up["min_office"])]["name"]], 14, C_DIM))
+	tab_compute.add_child(srow)
 	if not lab.datacenters.is_empty():
-		tab_compute.add_child(_label("Eigene Rechenzentren: Leistung %.0f, Kosten %s/Tag  (verwalten im Tab 'Ausbau')" % [lab.dc_total_power(), lab.fmt_money(lab.daily_dc_cost())], 15, C_ACCENT))
+		tab_compute.add_child(_label("Rechenzentren: Leistung %s, Kosten %s/Tag (verwalten unter „Ausbau“)" % [_short(lab.dc_total_power()), lab.fmt_money(lab.daily_dc_cost())], 14, C_ACCENT))
 	else:
-		tab_compute.add_child(_wrap("Ab 2018 kannst du unter „Ausbau“ (Haus-Symbol) oder in der Weltansicht Grundstücke kaufen, eigene Rechenzentren bauen und Hardware kaufen statt mieten.", C_DIM))
+		tab_compute.add_child(_wrap("Ab 2018: eigene Rechenzentren auf Grundstücken (Weltansicht oder „Ausbau“).", C_DIM))
+
+
+func _amount_row(title: String, amounts: Array, cap: int, avail: int, cb: Callable, sign: String) -> HFlowContainer:
+	var row := HFlowContainer.new()
+	row.add_theme_constant_override("h_separation", 6)
+	row.add_child(_label(title, 14))
+	for n in amounts:
+		if n <= cap:
+			var nn: int = n
+			var b := _button("%s%d" % [sign, n], func(): cb.call(nn))
+			b.disabled = avail <= 0
+			row.add_child(b)
+	return row
 
 
 func _build_research() -> void:
 	_clear(tab_research)
 	research_btns.clear()
-	tab_research.add_child(_label("Forschung", 22, C_ACCENT))
 	research_rp_label = _label("", 16)
 	tab_research.add_child(research_rp_label)
-	tab_research.add_child(_wrap("Forschende erzeugen täglich Punkte. Open-Weights-Modelle bringen zusätzliche Punkte aus der Community.", C_DIM))
+	tab_research.add_child(_label("Forschende erzeugen Punkte; Open-Weights-Modelle bringen Punkte aus der Community. Klick auf einen Knoten für Details.", 13, C_DIM))
+	# Spalten-Köpfe
+	var cols := ["arch", "safety", "infra"]
+	var col_names := {"arch": "Architektur", "safety": "Sicherheit", "infra": "Infrastruktur"}
+	var col_colors := {"arch": C_ACCENT, "safety": C_GOOD, "infra": C_WARN}
+	var head := HBoxContainer.new()
+	for c in cols:
+		var l := _label(col_names[c], 14, col_colors[c])
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		head.add_child(l)
+	tab_research.add_child(head)
+	# Zeilen nach Jahr
+	var years := []
 	for t in D.TECHS:
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 12)
-		var v := VBoxContainer.new()
-		v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		var kind: String = {"arch": "Architektur", "safety": "Sicherheit", "infra": "Infrastruktur"}[t["kind"]]
-		var state: String = lab.tech_state(t["id"])
-		v.add_child(_label("%s  ·  %s" % [t["name"], kind], 16, C_GOOD if state == "done" else (C_TEXT if state == "available" else C_DIM)))
-		v.add_child(_wrap(t["desc"], C_DIM))
-		row.add_child(v)
+		if not int(t["year"]) in years:
+			years.append(int(t["year"]))
+	years.sort()
+	var row_h := 74.0
+	var tree := Control.new()
+	tree.custom_minimum_size = Vector2(0, years.size() * row_h + 10)
+	tree.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tab_research.add_child(tree)
+	var nodes := {}   # id -> Button
+	for t in D.TECHS:
+		var id: String = t["id"]
+		var state: String = lab.tech_state(id)
+		var b := Button.new()
+		b.focus_mode = Control.FOCUS_NONE
+		b.text = "%s\n%s" % [t["name"], "erforscht" if state == "done" else ("%d FP · ab %d" % [t["rp"], t["year"]] if state == "future" else "%d FP" % t["rp"])]
+		b.add_theme_font_size_override("font_size", 13)
+		b.tooltip_text = t["desc"]
+		var sb := StyleBoxFlat.new()
+		sb.set_corner_radius_all(6)
+		sb.set_content_margin_all(4)
+		sb.set_border_width_all(2)
+		var col: Color = col_colors[t["kind"]]
 		match state:
 			"done":
-				row.add_child(_label("erforscht", 15, C_GOOD))
-			"future":
-				row.add_child(_label("ab %d" % t["year"], 15, C_DIM))
-			"locked":
-				row.add_child(_label("braucht %s" % lab.tech(t["req"])["name"], 15, C_DIM))
+				sb.bg_color = col.darkened(0.6)
+				sb.border_color = col
+			"available":
+				sb.bg_color = C_PANEL2
+				sb.border_color = col if lab.rp >= float(t["rp"]) else col.darkened(0.5)
 			_:
-				var b := _button("Erforschen (%d)" % t["rp"], func(): _show_error(lab.research(t["id"])))
+				sb.bg_color = Color("15181e")
+				sb.border_color = Color(1, 1, 1, 0.08)
+				b.modulate = Color(1, 1, 1, 0.55)
+		if research_sel == id:
+			sb.border_color = Color.WHITE
+			sb.set_border_width_all(3)
+		for st in ["normal", "hover", "pressed"]:
+			b.add_theme_stylebox_override(st, sb)
+		b.pressed.connect(func(): research_sel = id; _build_research(); audio.play("click"))
+		tree.add_child(b)
+		nodes[id] = b
+		if state == "available":
+			research_btns.append({"btn": b, "cost": float(t["rp"]), "tree": true})
+	var layout := func():
+		var w := tree.size.x / 3.0
+		for t in D.TECHS:
+			var b: Button = nodes[t["id"]]
+			var ci := cols.find(t["kind"])
+			var ri := years.find(int(t["year"]))
+			b.size = Vector2(w - 16.0, row_h - 18.0)
+			b.position = Vector2(ci * w + 8.0, ri * row_h + 6.0)
+		tree.queue_redraw()
+	tree.resized.connect(layout)
+	tree.draw.connect(func():
+		for t in D.TECHS:
+			if t["req"] == "" or not nodes.has(t["req"]):
+				continue
+			var a: Button = nodes[t["req"]]
+			var b: Button = nodes[t["id"]]
+			var done: bool = lab.techs.has(t["req"])
+			var c := Color(1, 1, 1, 0.35) if done else Color(1, 1, 1, 0.12)
+			var p0 := a.position + Vector2(a.size.x / 2.0, a.size.y)
+			var p1 := b.position + Vector2(b.size.x / 2.0, 0)
+			var mid := (p0.y + p1.y) / 2.0
+			tree.draw_polyline(PackedVector2Array([p0, Vector2(p0.x, mid), Vector2(p1.x, mid), p1]), c, 2.0, true))
+	layout.call_deferred()
+	# Details zum gewählten Knoten
+	if research_sel == "" or lab.tech(research_sel).is_empty():
+		for t in D.TECHS:
+			if lab.tech_state(t["id"]) == "available":
+				research_sel = t["id"]
+				break
+	if research_sel != "":
+		var t: Dictionary = lab.tech(research_sel)
+		var st: String = lab.tech_state(research_sel)
+		var p := PanelContainer.new()
+		p.add_theme_stylebox_override("panel", _hud_style(Color("15181e"), 8))
+		var v := VBoxContainer.new()
+		p.add_child(v)
+		v.add_child(_label("%s  ·  %s" % [t["name"], col_names[t["kind"]]], 18, col_colors[t["kind"]]))
+		v.add_child(_wrap(t["desc"], C_TEXT))
+		if t["kind"] == "arch":
+			v.add_child(_label("Qualität ×%.2f · Trainings-Effizienz ×%.2f" % [t["quality"], t["eff"]], 14, C_DIM))
+		match st:
+			"done":
+				v.add_child(_label("Bereits erforscht.", 14, C_GOOD))
+			"future":
+				v.add_child(_label("Verfügbar ab %d." % t["year"], 14, C_DIM))
+			"locked":
+				v.add_child(_label("Braucht zuerst: %s" % lab.tech(t["req"])["name"], 14, C_WARN))
+			_:
+				var rid: String = research_sel
+				var b := _button("Erforschen: %d FP" % t["rp"], func(): _show_error(lab.research(rid)))
 				research_btns.append({"btn": b, "cost": float(t["rp"])})
-				row.add_child(b)
-		tab_research.add_child(row)
-		tab_research.add_child(HSeparator.new())
+				v.add_child(b)
+		tab_research.add_child(p)
 
 
 func _build_products() -> void:
@@ -646,7 +848,7 @@ func _build_products() -> void:
 	grid.columns = 6
 	grid.add_theme_constant_override("h_separation", 14)
 	grid.add_theme_constant_override("v_separation", 8)
-	for hd in ["Modell", "Status", "Bewertung", "Umsatz/Tag", "Risiko", ""]:
+	for hd in ["Modell", "Status", "Bewertung", "Nutzer · Umsatz", "Risiko", ""]:
 		grid.add_child(_label(hd, 13, C_DIM))
 	for i in range(lab.models.size() - 1, -1, -1):
 		var m: Dictionary = lab.models[i]
@@ -1154,22 +1356,33 @@ func _show_error(err: String) -> void:
 
 # ================================================================ Speichern
 
-func _save(auto := false) -> void:
-	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+## Spielstände: 3 Plätze + Autosave (+ alter Einzel-Spielstand, falls vorhanden)
+func _slot_path(slot: int) -> String:
+	return AUTOSAVE_PATH if slot == 0 else ("user://slot_%d.json" % slot)
+
+
+func _save(auto := false, slot := -1) -> void:
+	if slot < 0:
+		slot = 0 if auto else last_slot
+	var d: Dictionary = lab.to_dict()
+	d["meta"] = {"date": lab.date_string(), "money": lab.fmt_money(lab.money), "office": lab.office_data()["name"],
+		"saved": Time.get_datetime_string_from_system(false, true)}
+	var f := FileAccess.open(_slot_path(slot), FileAccess.WRITE)
 	if f == null:
 		_show_error("Speichern fehlgeschlagen.")
 		return
-	f.store_string(JSON.stringify(lab.to_dict()))
+	f.store_string(JSON.stringify(d))
 	f.close()
 	if not auto:
-		_toast("[color=#8a90a0]Gespeichert.[/color]")
+		last_slot = slot
+		_toast("[color=#8a90a0]Gespeichert in Platz %d.[/color]" % slot)
 
 
-func _load() -> void:
-	if not FileAccess.file_exists(SAVE_PATH):
+func _load_slot(path: String) -> void:
+	if not FileAccess.file_exists(path):
 		_show_error("Kein Spielstand vorhanden.")
 		return
-	var d = JSON.parse_string(FileAccess.get_file_as_string(SAVE_PATH))
+	var d = JSON.parse_string(FileAccess.get_file_as_string(path))
 	if typeof(d) != TYPE_DICTIONARY:
 		_show_error("Spielstand ist beschädigt.")
 		return
@@ -1177,6 +1390,59 @@ func _load() -> void:
 	lab.from_dict(d)
 	_reset_view()
 	_set_speed(0)
+	if save_popup != null:
+		save_popup.hide()
+	_toast("[color=#8a90a0]Spielstand geladen – pausiert.[/color]")
+
+
+func _slot_info(path: String) -> String:
+	if not FileAccess.file_exists(path):
+		return "leer"
+	var d = JSON.parse_string(FileAccess.get_file_as_string(path))
+	if typeof(d) != TYPE_DICTIONARY:
+		return "beschädigt"
+	var m: Dictionary = d.get("meta", {})
+	if m.is_empty():
+		return "alter Spielstand"
+	return "%s · %s · %s  (gespeichert %s)" % [m.get("date", "?"), m.get("money", "?"), m.get("office", "?"), String(m.get("saved", "")).left(16)]
+
+
+func _open_save_popup(anchor: Control) -> void:
+	if save_popup == null:
+		save_popup = PopupPanel.new()
+		save_popup.add_theme_stylebox_override("panel", _hud_style(Color(0.09, 0.1, 0.13, 0.97), 10))
+		add_child(save_popup)
+	for c in save_popup.get_children():
+		save_popup.remove_child(c)
+		c.queue_free()
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 8)
+	save_popup.add_child(v)
+	v.add_child(_label("Spielstände", 18, C_ACCENT))
+	var rows := [[1, "Platz 1"], [2, "Platz 2"], [3, "Platz 3"], [0, "Autosave"]]
+	if FileAccess.file_exists(SAVE_PATH):
+		rows.append([-1, "Alter Spielstand"])
+	for r in rows:
+		var slot: int = r[0]
+		var path: String = SAVE_PATH if slot == -1 else _slot_path(slot)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		var info := VBoxContainer.new()
+		info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		info.add_theme_constant_override("separation", -3)
+		info.add_child(_label(r[1], 15))
+		info.add_child(_label(_slot_info(path), 12, C_DIM))
+		row.add_child(info)
+		if slot > 0:
+			row.add_child(_button("Speichern", func(): _save(false, slot); _open_save_popup(anchor)))
+		var lb := _button("Laden", func(): _load_slot(path))
+		lb.disabled = not FileAccess.file_exists(path)
+		row.add_child(lb)
+		v.add_child(row)
+	v.add_child(_label("F5 = schnell speichern (Platz %d) · Autosave alle 90 Tage" % last_slot, 12, C_DIM))
+	var pos := anchor.get_global_rect().position + Vector2(-420, anchor.size.y + 8)
+	save_popup.popup(Rect2i(Vector2i(pos), Vector2i(520, 10)))
+
 
 
 # ================================================================ UI-Aufbau
@@ -1357,9 +1623,15 @@ func _build_topbar() -> Control:
 	var sp := Control.new()
 	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_child(sp)
-	var speed_icons := ["icons/pause", "icons/right", "icons/fastForward", "icons/next"]
-	for i in range(speed_icons.size()):
-		var b := _icon_button(speed_icons[i], _set_speed.bind(i), ["Pause (Leertaste)", "Tempo 1 (Taste 1)", "Tempo 2 (Taste 2)", "Tempo 3 (Taste 3)"][i], 38)
+	for i in range(4):
+		var tips := ["Pause (Leertaste)", "Normal: 1 Tag = 0,5 s (Taste 1)", "Schnell: 2× (Taste 2)", "Sehr schnell: 5× (Taste 3) – pausiert bei Ereignissen"]
+		var b: Button
+		if i == 0:
+			b = _icon_button("icons/pause", _set_speed.bind(i), tips[i], 38)
+		else:
+			b = _button(["", "1×", "2×", "5×"][i], _set_speed.bind(i), tips[i])
+			b.custom_minimum_size = Vector2(42, 38)
+			b.add_theme_font_size_override("font_size", 15)
 		speed_btns.append(b)
 		h.add_child(b)
 	h.add_child(VSeparator.new())
@@ -1369,8 +1641,9 @@ func _build_topbar() -> Control:
 	var gb := _icon_button("icons/gear", func(): pass, "Grafik (F11 = Vollbild)", 38)
 	gb.pressed.connect(func(): _open_gfx_popup(gb))
 	h.add_child(gb)
-	h.add_child(_icon_button("icons/save", _save.bind(false), "Speichern", 38))
-	h.add_child(_icon_button("icons/import", _load, "Laden", 38))
+	var sv := _icon_button("icons/save", func(): pass, "Spielstände: speichern & laden (F5 = schnell speichern)", 38)
+	sv.pressed.connect(func(): _open_save_popup(sv))
+	h.add_child(sv)
 	h.add_child(_icon_button("icons/information", func(): lab.flags["tut"] = 0, "Tutorial neu starten", 38))
 	h.add_child(_icon_button("icons/return", _confirm_new_game, "Neues Spiel", 38))
 	return p
