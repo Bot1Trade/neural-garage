@@ -347,45 +347,137 @@ func _emote_person(p: Dictionary, e: String) -> void:
 # ------------------------------------------------------------------ Leben & Umgebung
 
 func _build_surroundings(w: int, d: int, room: Dictionary) -> void:
-	_ground(Vector2(70, 70), Vector3(w / 2.0, -0.12, d / 2.0), OUTSIDE[lab.office])
-	var slab := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = Vector3(w + 0.3, 0.25, d + 0.3)
-	slab.mesh = bm
-	var smat := StandardMaterial3D.new()
-	smat.albedo_color = Color("2b2f37")
-	slab.material_override = smat
-	slab.position = Vector3(w / 2.0, -0.125, d / 2.0)
-	world.add_child(slab)
-	# Bodenkacheln/Dielen im Schachbrett
-	var base: Color = room["floor"]
-	var mat_a := StandardMaterial3D.new()
-	mat_a.albedo_color = base.lightened(0.06)
-	mat_a.roughness = 0.8
-	var mat_b := StandardMaterial3D.new()
-	mat_b.albedo_color = base.darkened(0.05)
-	mat_b.roughness = 0.8
-	var pm := PlaneMesh.new()
-	pm.size = Vector2(1.0, 1.0)
-	for x in range(w):
-		for z in range(d):
-			var tile := MeshInstance3D.new()
-			tile.mesh = pm
-			tile.material_override = mat_a if (x + z) % 2 == 0 else mat_b
-			tile.position = Vector3(x + 0.5, 0.0, z + 0.5)
-			world.add_child(tile)
+	var tier: int = lab.office
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 7 + lab.office
-	if lab.office == 0:
-		_place_from(CARS, "sedan", Vector3(w + 1.2, -0.12, d * 0.5), 0.0, Vector3.ONE * 0.32)
-	# Hohe Bäume nur hinter den Wänden, vorne nur niedrige Pflanzen (verdecken nichts)
-	if lab.office != 0 and lab.office != 3:
-		for i in range(14):
-			var p := Vector3(rng.randf_range(-4.0, -0.9), -0.12, rng.randf_range(-3.0, d + 2.0)) if i % 2 == 0 else Vector3(rng.randf_range(-3.0, w + 2.0), -0.12, rng.randf_range(-4.0, -0.9))
-			_place_from(NATURE, TREES[rng.randi() % TREES.size()], p, rng.randf_range(0, 360), Vector3.ONE * rng.randf_range(1.3, 2.0))
-		for i in range(16):
-			var p := Vector3(w + rng.randf_range(0.5, 3.0), -0.12, rng.randf_range(0.0, d + 2.0)) if i % 2 == 0 else Vector3(rng.randf_range(0.0, w + 2.0), -0.12, d + rng.randf_range(0.5, 3.0))
-			_place_from(NATURE, LOW_PLANTS[rng.randi() % LOW_PLANTS.size()], p, rng.randf_range(0, 360), Vector3.ONE * rng.randf_range(1.2, 2.0))
+	rng.seed = 7 + tier
+	# Gebäudesockel (Schnittkante)
+	_box(Vector3(w / 2.0, -0.125, d / 2.0), Vector3(w + 0.3, 0.25, d + 0.3), Color("2b2f37"), 0.0, 0.8)
+	_floor(w, d, room["floor"], tier >= 3)
+	if tier == 3:
+		_build_rooftop(w, d, rng)
+		return
+	# Rasen + Gehweg ums Haus
+	_ground(Vector2(70, 70), Vector3(w / 2.0, -0.12, d / 2.0), Color("4f7d3f"))
+	var walk := Color("b9b4aa")
+	_box(Vector3(w / 2.0, -0.115, d / 2.0), Vector3(w + 1.6, 0.02, d + 1.6), walk, 0.0, 0.9)
+	if tier == 0:
+		# Einfahrt + Straße vor der Garage
+		_box(Vector3(w + 1.9, -0.11, d / 2.0), Vector3(2.4, 0.02, 2.2), Color("4a4d53"), 0.0, 0.9)
+		_place_from(CARS, "sedan", Vector3(w + 1.9, -0.1, d / 2.0), 90.0, Vector3.ONE * 0.32)
+		for z in range(-3, d + 5):
+			_place_from(ROADS, "road-straight", Vector3(w + 3.7, -0.11, z), 0.0, Vector3.ONE)
+		_place_from(ROADS, "light-square", Vector3(w + 3.0, -0.12, d + 1.0), 90.0, Vector3.ONE)
+	# Hecken vorne (unterbrochen), Bäume nur hinten
+	# geschnittene Hecke mit Lücke als Eingang
+	var hedge := Color("2f5e2c")
+	_box(Vector3((w + 1.0) * 0.3, 0.05, d + 1.2), Vector3((w + 1.0) * 0.6, 0.34, 0.32), hedge, 0.0, 0.95)
+	_box(Vector3((w + 1.0) * 0.85 - 0.2, 0.05, d + 1.2), Vector3((w + 1.0) * 0.3, 0.34, 0.32), hedge, 0.0, 0.95)
+	if tier != 0:
+		_box(Vector3(w + 1.2, 0.05, (d + 1.0) * 0.35), Vector3(0.32, 0.34, (d + 1.0) * 0.7), hedge, 0.0, 0.95)
+	for i in range(16):
+		var p := Vector3(rng.randf_range(-4.5, -1.2), -0.12, rng.randf_range(-3.0, d + 2.0)) if i % 2 == 0 else Vector3(rng.randf_range(-3.0, w + 2.0), -0.12, rng.randf_range(-4.5, -1.2))
+		_place_from(NATURE, TREES[rng.randi() % TREES.size()], p, rng.randf_range(0, 360), Vector3.ONE * rng.randf_range(1.4, 2.1))
+	# Blumenbeete vor den Hecken
+	for i in range(10):
+		var p := Vector3(rng.randf_range(-0.5, w + 1.5), -0.12, d + rng.randf_range(1.7, 3.2))
+		_place_from(NATURE, ["flower_redA", "flower_yellowA", "flower_purpleA"][i % 3], p, rng.randf_range(0, 360), Vector3.ONE * 1.3)
+
+
+## Tech-Tower: Dachterrasse hoch über der Stadt
+func _build_rooftop(w: int, d: int, rng: RandomNumberGenerator) -> void:
+	var terr := 2.0
+	_box(Vector3(w / 2.0 + 0.5, -0.14, d / 2.0 + 0.5), Vector3(w + terr * 2.0, 0.04, d + terr * 2.0), Color("9a958d"), 0.0, 0.85)
+	_box(Vector3(w / 2.0 + 0.5, -2.07, d / 2.0 + 0.5), Vector3(w + terr * 2.0, 3.86, d + terr * 2.0), Color("5d6573"), 0.3, 0.6)
+	# Glasgeländer
+	var glass := StandardMaterial3D.new()
+	glass.albedo_color = Color(0.75, 0.88, 1.0, 0.25)
+	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glass.roughness = 0.05
+	var x0 := 0.5 - terr + 0.05
+	var x1 := w + terr + 0.5 - 0.05
+	var z0 := 0.5 - terr + 0.05
+	var z1 := d + terr + 0.5 - 0.05
+	for seg in [[Vector3((x0 + x1) / 2.0, 0.1, z1), Vector3(x1 - x0, 0.45, 0.03)], [Vector3(x1, 0.1, (z0 + z1) / 2.0), Vector3(0.03, 0.45, z1 - z0)]]:
+		var g := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = seg[1]
+		g.mesh = bm
+		g.material_override = glass
+		g.position = seg[0]
+		world.add_child(g)
+		_box(seg[0] + Vector3(0, 0.23, 0), Vector3(maxf(seg[1].x, 0.05), 0.03, maxf(seg[1].z, 0.05)), Color("c9ccd2"), 0.8, 0.3)
+	# Pflanzkübel und Lounge auf der Terrasse
+	for i in range(6):
+		_place("pottedPlant", Vector3(x1 - 0.4, -0.12, z0 + 0.6 + i * (z1 - z0 - 1.2) / 5.0), rng.randf_range(0, 360), Vector3.ONE * 1.3)
+	_place("loungeSofa", Vector3(w * 0.4, -0.12, z1 - 0.45), 180.0)
+	_place("tableCoffee", Vector3(w * 0.4, -0.12, z1 - 1.1), 0.0)
+	_place("loungeDesignChair", Vector3(w * 0.7, -0.12, z1 - 0.6), 160.0)
+	# Stadt unten: Dächer knapp unter der Terrassenkante
+	var low_y := -4.0
+	_ground(Vector2(90, 90), Vector3(w / 2.0, low_y, d / 2.0), Color("4b5247"))
+	for i in range(-12, 13):
+		_place_from(ROADS, "road-straight", Vector3(w + terr + 3.0, low_y + 0.005, d / 2.0 + i), 0.0, Vector3.ONE)
+	var lows := ["building-a", "building-b", "building-c", "building-d", "building-h", "building-e", "building-k"]
+	var placed := 0
+	var tries := 0
+	while placed < 30 and tries < 300:
+		tries += 1
+		var p := Vector3(rng.randf_range(-10.0, w + 12.0), low_y, rng.randf_range(-10.0, d + 12.0))
+		var inside_x := p.x > 0.5 - terr - 1.2 and p.x < w + terr + 1.7
+		var inside_z := p.z > 0.5 - terr - 1.2 and p.z < d + terr + 1.7
+		if (inside_x and inside_z) or absf(p.x - (w + terr + 3.0)) < 1.3:
+			continue
+		_place_from(CITY, lows[rng.randi() % lows.size()], p, [0.0, 90.0, 180.0, 270.0][rng.randi() % 4], Vector3.ONE * rng.randf_range(1.3, 1.8))
+		placed += 1
+	for i in range(14):
+		var p := Vector3(rng.randf_range(-8.0, w + 10.0), low_y, d + terr + rng.randf_range(2.0, 7.0))
+		_place_from(NATURE, TREES[rng.randi() % TREES.size()], p, rng.randf_range(0, 360), Vector3.ONE * 1.6)
+
+
+## Boden: Holzdielen (versetzt) oder Teppichfliesen, je ein MultiMesh
+func _floor(w: int, d: int, base: Color, carpet: bool) -> void:
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	var bm := BoxMesh.new()
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.roughness = 0.75 if not carpet else 0.95
+	bm.material = mat
+	var items := []
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 3
+	if carpet:
+		bm.size = Vector3(0.49, 0.012, 0.49)
+		for x in range(w * 2):
+			for z in range(d * 2):
+				var c := base.lerp(Color("4a5566"), 0.25)
+				c = c.lightened(0.05) if (x + z) % 2 == 0 else c.darkened(0.04)
+				items.append([Vector3(x * 0.5 + 0.25, 0.0, z * 0.5 + 0.25), Vector3.ONE, c.lightened(rng.randf_range(-0.03, 0.03))])
+	else:
+		bm.size = Vector3(1.0, 0.012, 0.19)
+		var rows := int(d / 0.2)
+		for r in range(rows):
+			var x := -rng.randf_range(0.0, 0.8)
+			while x < w:
+				var length := rng.randf_range(0.8, 1.6)
+				var x_a := maxf(x, 0.0)
+				var x_b := minf(x + length, float(w))
+				if x_b - x_a > 0.05:
+					var c := base.lightened(rng.randf_range(-0.07, 0.1))
+					items.append([Vector3((x_a + x_b) / 2.0, 0.0, r * 0.2 + 0.1), Vector3(x_b - x_a - 0.012, 1, 1), c])
+				x += length
+	mm.mesh = bm
+	mm.instance_count = items.size()
+	for i in range(items.size()):
+		var it: Array = items[i]
+		mm.set_instance_transform(i, Transform3D(Basis.from_scale(it[1]), it[0]))
+		mm.set_instance_color(i, it[2])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	world.add_child(mmi)
+	# dunkle Fugen darunter
+	_box(Vector3(w / 2.0, -0.007, d / 2.0), Vector3(w, 0.002, d), base.darkened(0.45), 0.0, 0.9)
 
 
 func _screen_glow(pos: Vector3) -> void:
@@ -586,6 +678,9 @@ func _build_office() -> void:
 		desk_spots.append(pos)
 		_place("desk", pos, 0.0)
 		_desk_clutter(pos, drng)
+		if lab.office >= 3:
+			_box(pos + Vector3(0, 0.275, -0.24), Vector3(1.05, 0.55, 0.03), Color("6b7a8f"), 0.0, 0.9)
+			_box(pos + Vector3(0, 0.555, -0.24), Vector3(1.05, 0.015, 0.04), Color("c9ccd2"), 0.6, 0.4)
 		_place("computerScreen", pos + Vector3(0, 0.38, -0.08), 0.0)
 		if i < desks:
 			_screen_glow(pos + Vector3(0, 0.38 + 0.165, -0.022))
@@ -945,17 +1040,17 @@ func _add_person(p: Dictionary, pos: Vector3) -> void:
 		ap.seek(randf() * 0.5)
 		people.append({"anim": ap, "node": holder, "seat": pos, "busy": false})
 	var ring := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = 0.26
-	cm.bottom_radius = 0.26
-	cm.height = 0.01
+	var cm := TorusMesh.new()
+	cm.inner_radius = 0.19
+	cm.outer_radius = 0.23
 	ring.mesh = cm
+	ring.scale = Vector3(1.0, 0.25, 1.0)
 	var rm := StandardMaterial3D.new()
 	var col: Color = D.ROLES[p["role"]]["color"]
 	rm.albedo_color = col
 	rm.emission_enabled = true
 	rm.emission = col
-	rm.emission_energy_multiplier = 0.6
+	rm.emission_energy_multiplier = 0.35
 	ring.material_override = rm
 	ring.position = Vector3(pos.x, 0.012, pos.z)
 	world.add_child(ring)

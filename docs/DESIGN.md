@@ -166,3 +166,9 @@ Kaffeebar (+10 % Forschung) · Konferenzräume (+Qualität) · Fitness & Ruherau
 - Pro Modell gibt es **10 Fokus-Punkte** (Hilfsbereitschaft, Coding, Kreativität, Sicherheit). Ziehst du einen Regler über das Budget, nimmt das Spiel Punkte vom stärksten anderen Bereich. Vorher konnte man alles auf 10 stellen, ohne Nachteil.
 - Ungenutzte Punkte kosten Qualität (bis −30 % bei 0 verteilten Punkten).
 - Code-Daten-Bonus 0,025 pro Coding-Punkt (vorher 0,015, aber ohne Obergrenze). Balance: 23 sichere AGI, 4 Pleiten, 3 Mal Helix zuerst (30 Bot-Runs).
+
+## 15. Grafik-Feinschliff (23.11.2026)
+
+- Boden: Holzdielen (versetzt, Farbvariation) bis Loft, Teppichfliesen ab Tech-Tower – als MultiMesh.
+- Umgebung je Stufe: Garage mit Einfahrt, Auto und Straße; sonst Gehweg, geschnittene Hecke mit Eingang, Blumenbeet, Bäume hinten. Tech-Tower als Dachterrasse mit Glasgeländer und Pflanzkübeln über der Stadt.
+- Ab Tech-Tower Trennwände hinter den Monitoren (brechen das Tisch-Raster auf). Rollen als schmale Ringe statt Scheiben.
