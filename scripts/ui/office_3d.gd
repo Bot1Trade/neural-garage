@@ -54,6 +54,8 @@ var released_seen := -1
 var t := 0.0
 var cars: Array = []
 var coffee_timer := 0.0
+var desk_spots: Array = []
+var occ: Dictionary = {}       # belegte 0,5-m-Zellen im Büro
 var fx_timer := 0.0
 var money_ticks := 0
 var aabb_cache := {}
@@ -80,6 +82,11 @@ func _ready() -> void:
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.keep_aspect = Camera3D.KEEP_HEIGHT
+	var ca := CameraAttributesPractical.new()
+	ca.dof_blur_far_enabled = true
+	ca.dof_blur_near_enabled = true
+	ca.dof_blur_amount = 0.05
+	camera.attributes = ca
 	viewport.add_child(camera)
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
@@ -181,6 +188,14 @@ func _update_camera() -> void:
 	camera.position = c + Vector3(sin(r) * 14.0, 11.0, cos(r) * 14.0)
 	camera.look_at(c, Vector3.UP)
 	camera.size = cam_base_size * zoom
+	# Tilt-Shift: Mitte scharf, oben/unten leicht unscharf (Miniatur-Look)
+	var ca := camera.attributes as CameraAttributesPractical
+	if ca != null:
+		var dist := camera.position.distance_to(c)
+		ca.dof_blur_far_distance = dist + camera.size * 0.22
+		ca.dof_blur_far_transition = camera.size * 0.35
+		ca.dof_blur_near_distance = maxf(0.1, dist - camera.size * 0.22)
+		ca.dof_blur_near_transition = camera.size * 0.3
 	# Wände zwischen Kamera und Raum ausblenden
 	for w in walls_z:
 		w.visible = cos(r) > -0.2
@@ -407,6 +422,36 @@ func _set_car(c: Dictionary) -> void:
 		n.rotation_degrees.y = 0.0 if float(c["dir"]) > 0.0 else 180.0
 
 
+func _world_extras() -> void:
+	# Parkplatz neben dem Labor
+	var lot := LAB_POS + Vector3(2.2, 0.006, 0.4)
+	_box(lot, Vector3(1.6, 0.012, 2.0), Color("3b3f46"), 0.0, 0.9)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 5
+	for i in range(mini(2 + lab.office, 6)):
+		var cp := lot + Vector3(-0.4 + (i % 2) * 0.8, 0.01, -0.7 + floori(i / 2.0) * 0.7)
+		_place_from(CARS, CAR_MODELS[rng.randi() % CAR_MODELS.size()], cp, 0.0, Vector3.ONE * 0.24)
+	# Park mit Bänken und Brunnen-Rasen
+	for park in [Vector3(-9.0, 0, 7.5), Vector3(10.0, 0, 4.0)]:
+		_box(park + Vector3(0, 0.004, 0), Vector3(4.0, 0.008, 3.2), Color("4a8a3e"), 0.0, 0.95)
+		_box(park + Vector3(0, 0.01, 0), Vector3(3.2, 0.01, 0.35), Color("c8b48a"), 0.0, 0.95)
+		_box(park + Vector3(0, 0.01, 0), Vector3(0.35, 0.01, 2.6), Color("c8b48a"), 0.0, 0.95)
+		for b in range(4):
+			var off: Vector3 = [Vector3(0.6, 0, 0.45), Vector3(-0.6, 0, 0.45), Vector3(0.6, 0, -0.45), Vector3(-0.6, 0, -0.45)][b]
+			_place("benchCushion", park + off, 0.0 if off.z < 0 else 180.0, Vector3.ONE * 1.4)
+		for tpos in [Vector3(1.5, 0, 1.2), Vector3(-1.5, 0, 1.2), Vector3(1.5, 0, -1.2), Vector3(-1.5, 0, -1.2)]:
+			_place_from(NATURE, TREES[rng.randi() % TREES.size()], park + tpos, rng.randf_range(0, 360), Vector3.ONE * 1.8)
+		for f in range(10):
+			_place_from(NATURE, LOW_PLANTS[rng.randi() % LOW_PLANTS.size()], park + Vector3(rng.randf_range(-1.8, 1.8), 0, rng.randf_range(-1.4, 1.4)), rng.randf_range(0, 360), Vector3.ONE * 1.6)
+	# Skyline hinten
+	var sky := ["building-skyscraper-a", "building-skyscraper-c", "building-skyscraper-e", "building-l", "building-m"]
+	for i in range(9):
+		var sp := Vector3(-15.0 + i * 1.6, 0, -15.5) if i % 2 == 0 else Vector3(-15.5, 0, -13.0 + i * 1.6)
+		if sp.distance_to(HELIX_POS) < 3.0:
+			continue
+		_place_from(CITY, sky[i % sky.size()], sp, rng.randf_range(0, 360), Vector3.ONE * rng.randf_range(1.2, 1.7))
+
+
 ## Person geht zur Kaffeebar und zurück (über den Gang hinter den Stühlen)
 func _coffee_walk(p: Dictionary) -> void:
 	var node: Node3D = p["node"]
@@ -503,13 +548,20 @@ func _build_office() -> void:
 	var desks: int = mini(lab.staff.size(), room["max_desks"])
 	var cap: int = room["max_desks"]
 	var cols := maxi(1, floori((float(w) - 1.8) / 1.25))
+	var last_cz := 0.0
+	desk_spots.clear()
+	var drng := RandomNumberGenerator.new()
+	drng.seed = 31
 	for i in range(cap):
 		var cx := 0.95 + (i % cols) * 1.25
 		var cz := 1.1 + floori(i / float(cols)) * 1.35
 		if cz > d - 0.5:
 			break
 		var pos := Vector3(cx, 0, cz)
+		last_cz = cz
+		desk_spots.append(pos)
 		_place("desk", pos, 0.0)
+		_desk_clutter(pos, drng)
 		_place("computerScreen", pos + Vector3(0, 0.38, -0.08), 0.0)
 		if i < desks:
 			_screen_glow(pos + Vector3(0, 0.38 + 0.165, -0.022))
@@ -520,26 +572,7 @@ func _build_office() -> void:
 		else:
 			_place("chairDesk", pos + Vector3(0.05, 0, 0.48), 200.0)
 
-	_place("pottedPlant", Vector3(0.35, 0, d - 0.35), 0.0)
-	_place("trashcan", Vector3(0.3, 0, 0.35), 0.0)
-	var up: Dictionary = lab.office_upgrades
-	if up.has("coffee"):
-		_place("kitchenBar", Vector3(w - 0.35, 0, d - 0.3), -90.0)
-		_place("kitchenCoffeeMachine", Vector3(w - 0.35, 0.42, d - 0.3), -90.0)
-	if up.has("meeting"):
-		_place("bookcaseClosed", Vector3(1.5, 0, 0.2), 0.0)
-		_place("bookcaseOpen", Vector3(2.0, 0, 0.2), 0.0)
-	if up.has("gym"):
-		_place("rugRectangle", Vector3(w - 2.2, 0.0, d - 0.9), 0.0)
-		_place("loungeSofa", Vector3(w - 2.2, 0, d - 0.35), 180.0)
-		_place("tableCoffee", Vector3(w - 2.2, 0, d - 1.0), 0.0)
-		_place("lampSquareFloor", Vector3(w - 3.0, 0, d - 0.3), 0.0)
-	if up.has("hwlab"):
-		_place("cardboardBoxOpen", Vector3(w - 1.6, 0, 0.3), 15.0)
-		_place("cardboardBoxClosed", Vector3(w - 1.6, 0, 0.6), -10.0)
-	if lab.office >= 4:
-		walls_x.append(_place("televisionModern", Vector3(0.1, 0.6, d / 2.0), 90.0))
-		_place("pottedPlant", Vector3(w - 0.35, 0, d / 2.0 + 1.0), 0.0)
+	_decorate_office(w, d, last_cz, racks)
 
 	# Warmes Raumlicht
 	for lx in range(1, w, 3):
@@ -599,6 +632,7 @@ func _build_world() -> void:
 			continue
 		_place_from(CITY, fill[rng.randi() % fill.size()], p, rng.randf_range(0, 360), Vector3.ONE * rng.randf_range(1.0, 1.6))
 	cam_center = Vector3(-1.0, 0, -2.0)
+	_world_extras()
 	_world_nature_and_traffic()
 	cam_base_size = 23.0
 
@@ -639,30 +673,239 @@ func _ground(sz: Vector2, center: Vector3, col: Color) -> void:
 
 func _add_rack(pos: Vector3) -> void:
 	rack_nodes.append(pos)
-	var body := MeshInstance3D.new()
+	_box(pos + Vector3(0, 0.5, 0), Vector3(0.45, 1.0, 0.45), Color("23262e"), 0.5, 0.45)
+	_box(pos + Vector3(0, 0.5, 0.226), Vector3(0.38, 0.9, 0.01), Color("12141a"), 0.2, 0.2)
+	_box(pos + Vector3(0, 1.005, 0), Vector3(0.45, 0.01, 0.45), Color("3a3f4a"), 0.6, 0.4)
+	var strip := _box(pos + Vector3(0, 0.97, 0.232), Vector3(0.38, 0.015, 0.006), Color.BLACK, 0.0, 0.5)
+	var sm: StandardMaterial3D = strip.material_override
+	sm.emission_enabled = true
+	sm.emission = Color("4aa8ff")
+	sm.emission_energy_multiplier = 1.5
+	for row in range(6):
+		for col in range(2):
+			var led := MeshInstance3D.new()
+			var lm := BoxMesh.new()
+			lm.size = Vector3(0.05, 0.022, 0.01)
+			led.mesh = lm
+			var em := StandardMaterial3D.new()
+			em.albedo_color = Color.BLACK
+			em.emission_enabled = true
+			em.emission = Color("6be38a")
+			led.material_override = em
+			led.position = pos + Vector3(-0.12 + col * 0.24, 0.16 + row * 0.13, 0.233)
+			world.add_child(led)
+			rack_lights.append(em)
+
+
+func _box(pos: Vector3, sz: Vector3, col: Color, metal: float, rough: float) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
 	var bm := BoxMesh.new()
-	bm.size = Vector3(0.45, 1.0, 0.45)
-	body.mesh = bm
+	bm.size = sz
+	mi.mesh = bm
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color("2a2e38")
-	mat.metallic = 0.4
-	mat.roughness = 0.5
-	body.material_override = mat
-	body.position = pos + Vector3(0, 0.5, 0)
-	world.add_child(body)
-	for l in range(4):
-		var led := MeshInstance3D.new()
-		var lm := BoxMesh.new()
-		lm.size = Vector3(0.3, 0.035, 0.02)
-		led.mesh = lm
-		var em := StandardMaterial3D.new()
-		em.albedo_color = Color.BLACK
-		em.emission_enabled = true
-		em.emission = Color("6be38a")
-		led.material_override = em
-		led.position = pos + Vector3(0, 0.2 + l * 0.2, 0.235)
-		world.add_child(led)
-		rack_lights.append(em)
+	mat.albedo_color = col
+	mat.metallic = metal
+	mat.roughness = rough
+	mi.material_override = mat
+	mi.position = pos
+	world.add_child(mi)
+	return mi
+
+
+# ------------------------------------------------------------------ Büro-Deko
+
+## Kleinkram auf dem Schreibtisch (fest pro Platz)
+func _desk_clutter(pos: Vector3, rng: RandomNumberGenerator) -> void:
+	var top := pos + Vector3(0, 0.38, 0)
+	var r := rng.randf()
+	if r < 0.3:
+		_place(["plantSmall1", "plantSmall2", "plantSmall3"][rng.randi() % 3], top + Vector3(0.27, 0, -0.1), rng.randf_range(0, 360))
+	elif r < 0.55:
+		_place("books", top + Vector3(-0.26, 0, -0.1), rng.randf_range(-20, 20))
+	elif r < 0.75:
+		_place("lampRoundTable", top + Vector3(-0.27, 0, -0.1), 30.0)
+	if rng.randf() < 0.25:
+		_place("books", top + Vector3(0.26, 0, 0.05), rng.randf_range(60, 120))
+
+
+func _decorate_office(w: int, d: int, last_cz: float, racks: int) -> void:
+	var up: Dictionary = lab.office_upgrades
+	var tier: int = lab.office
+	var rack_depth := 0.45 + ceili(racks / 2.0) * 0.6
+	# Serverecke: dunkler Doppelboden
+	if racks > 0:
+		_box(Vector3(w - 0.72, 0.006, rack_depth / 2.0), Vector3(1.3, 0.012, rack_depth + 0.2), Color("1d2027"), 0.3, 0.6)
+	# Wandverkleidung (ab Hinterhof-Büro) – hängt an den Wänden, blendet mit ihnen aus
+	if tier >= 1:
+		for i in range(w * 2):
+			walls_z.append(_place("paneling", Vector3(i * 0.5 + 0.25, 0, 0.05), 0.0))
+		for i in range(d * 2):
+			walls_x.append(_place("paneling", Vector3(0.05, 0, i * 0.5 + 0.25), 90.0))
+	# Bilder an den Wänden (zwischen den Fenstern)
+	var art := ["emote_idea", "emote_star", "emote_heart", "emote_bars", "emote_music", "emote_cloud"]
+	var k := 0
+	for x in range(0, w, 2):
+		if x + 0.5 < w - 1.6:
+			_poster(Vector3(x + 0.5, 0.82, 0.07), 0.0, art[k % art.size()], walls_z)
+			k += 1
+	for z in range(0, d, 2):
+		_poster(Vector3(0.07, 0.82, z + 0.5), 90.0, art[k % art.size()], walls_x)
+		k += 1
+	# Ecken & Standard-Möbel
+	_place("pottedPlant", Vector3(0.35, 0, d - 0.35), 0.0)
+	_place("pottedPlant", Vector3(0.35, 0, 0.35), 0.0)
+	_place("trashcan", Vector3(0.75, 0, 0.3), 0.0)
+	_place("coatRackStanding", Vector3(0.3, 0, d - 0.95), 0.0)
+	var free_front := float(d) - (last_cz + 0.85)
+	if tier == 0:
+		# Garage: Kartons und Werkbank
+		_place("cardboardBoxClosed", Vector3(w - 1.7, 0, d - 0.3), 10.0)
+		_place("cardboardBoxClosed", Vector3(w - 1.45, 0, d - 0.35), -15.0)
+		_place("cardboardBoxClosed", Vector3(w - 1.58, 0.28, d - 0.32), 30.0)
+		_place("cardboardBoxOpen", Vector3(w - 2.2, 0, d - 0.3), 0.0)
+		_place("radio", Vector3(1.6, 0, 0.2), 0.0)
+	if tier >= 2:
+		_place("bookcaseOpenLow", Vector3(1.6, 0, 0.2), 0.0)
+		_place("bookcaseOpenLow", Vector3(2.05, 0, 0.2), 0.0)
+	if up.has("coffee"):
+		_place("kitchenBar", Vector3(w - 0.35, 0, d - 0.3), -90.0)
+		_place("kitchenCoffeeMachine", Vector3(w - 0.35, 0.42, d - 0.3), -90.0)
+		_place("kitchenFridge", Vector3(w - 0.3, 0, d - 0.85), -90.0)
+	if up.has("meeting"):
+		_place("bookcaseClosed", Vector3(2.6, 0, 0.2), 0.0)
+		_place("bookcaseOpen", Vector3(3.05, 0, 0.2), 0.0)
+	if up.has("gym"):
+		_place("rugRectangle", Vector3(w - 2.2, 0.0, d - 0.9), 0.0)
+		_place("loungeSofa", Vector3(w - 2.2, 0, d - 0.35), 180.0)
+		_place("tableCoffee", Vector3(w - 2.2, 0, d - 1.0), 0.0)
+		_place("lampSquareFloor", Vector3(w - 3.0, 0, d - 0.3), 0.0)
+		_place("loungeDesignChair", Vector3(w - 3.2, 0, d - 1.0), 90.0)
+	if up.has("hwlab"):
+		_place("tableCross", Vector3(w - 1.0, 0, rack_depth + 0.5), 90.0)
+		_place("cardboardBoxOpen", Vector3(w - 1.6, 0, rack_depth + 0.3), 15.0)
+		_place("speakerSmall", Vector3(w - 1.0, 0.35, rack_depth + 0.35), 0.0)
+	if up.has("daycare"):
+		_place("bear", Vector3(0.9, 0, d - 0.35), 140.0)
+		_place("rugRounded", Vector3(1.1, 0.004, d - 0.5), 0.0, Vector3.ONE * 0.6)
+	if tier >= 4:
+		walls_x.append(_place("televisionModern", Vector3(0.1, 0.6, d / 2.0), 90.0))
+	_auto_fill(w, d, rack_depth, racks)
+
+
+# ---- Belegungskarte: freie Flächen finden und füllen
+func _mark(x0: float, z0: float, x1: float, z1: float) -> void:
+	for gx in range(floori(x0 * 2.0), ceili(x1 * 2.0)):
+		for gz in range(floori(z0 * 2.0), ceili(z1 * 2.0)):
+			occ[Vector2i(gx, gz)] = true
+
+
+func _free(gx: int, gz: int, n: int, w: int, d: int) -> bool:
+	if gx < 0 or gz < 0 or gx + n > w * 2 or gz + n > d * 2:
+		return false
+	for x in range(gx, gx + n):
+		for z in range(gz, gz + n):
+			if occ.has(Vector2i(x, z)):
+				return false
+	return true
+
+
+func _find_spot(n: int, w: int, d: int) -> Vector3:
+	# vorne (große z) zuerst, damit die Fläche zur Kamera hin gefüllt wird
+	for gz in range(d * 2 - n, -1, -1):
+		for gx in range(0, w * 2 - n + 1):
+			if _free(gx, gz, n, w, d):
+				_mark(gx / 2.0, gz / 2.0, (gx + n) / 2.0, (gz + n) / 2.0)
+				return Vector3((gx + n / 2.0) / 2.0, 0, (gz + n / 2.0) / 2.0)
+	return Vector3(-1, -1, -1)
+
+
+func _auto_fill(w: int, d: int, rack_depth: float, racks: int) -> void:
+	occ.clear()
+	_mark(0, 0, w, 0.55)                 # Rückwand
+	_mark(0, 0, 0.55, d)                 # linke Wand
+	_mark(0, d - 1.2, 0.6, d)            # Garderobe/Pflanze
+	for dp in desk_spots:
+		_mark(dp.x - 0.6, dp.z - 0.35, dp.x + 0.6, dp.z + 0.9)
+	if racks > 0:
+		_mark(w - 1.45, 0, w, rack_depth + 0.15)
+	var up: Dictionary = lab.office_upgrades
+	if up.has("coffee"):
+		_mark(w - 0.9, d - 1.2, w, d)
+	if up.has("gym"):
+		_mark(w - 3.5, d - 1.6, w - 1.4, d)
+	if up.has("hwlab"):
+		_mark(w - 1.8, rack_depth, w - 0.4, rack_depth + 1.0)
+	if up.has("daycare"):
+		_mark(0.5, d - 1.0, 1.7, d)
+	if lab.office == 0:
+		_mark(w - 2.6, d - 0.8, w - 1.0, d)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 11 + lab.office
+	# 1) Besprechungsecke (1,5 m)
+	var m := _find_spot(3, w, d)
+	if m.y >= 0.0 and lab.office >= 1:
+		_place("rugRound", m + Vector3(0, 0.004, 0), 0.0, Vector3.ONE * 1.15)
+		_place("tableRound", m, 0.0, Vector3.ONE * 0.9)
+		for a in range(4):
+			var ang := a * PI / 2.0 + PI / 4.0
+			_place("chairCushion", m + Vector3(sin(ang) * 0.42, 0, cos(ang) * 0.42), rad_to_deg(ang) + 180.0)
+		_place("laptop", m + Vector3(0, 0.33, 0), 20.0, Vector3.ONE * 0.8)
+	# 2) weitere freie Meter: Lounge-Sessel oder Pflanzeninsel
+	for i in range(6):
+		var q := _find_spot(2, w, d)
+		if q.y < 0.0:
+			break
+		if i % 2 == 0:
+			_place("rugSquare", q + Vector3(0, 0.004, 0), 0.0, Vector3.ONE * 0.9)
+			_place("loungeChair", q + Vector3(-0.2, 0, 0), 60.0)
+			_place("sideTable", q + Vector3(0.28, 0, 0.1), -30.0, Vector3.ONE * 0.6)
+			_place("plantSmall2", q + Vector3(0.28, 0.23, 0.1), 0.0)
+		else:
+			_place("pottedPlant", q + Vector3(-0.15, 0, -0.1), rng.randf_range(0, 360))
+			_place_from(NATURE, LOW_PLANTS[rng.randi() % 3], q + Vector3(0.2, 0, 0.15), rng.randf_range(0, 360), Vector3.ONE * 1.3)
+			_place("lampSquareFloor", q + Vector3(0.2, 0, -0.2), 0.0)
+	# 3) schmale Reste: einzelne Pflanzen
+	for i in range(4):
+		var r := _find_spot(1, w, d)
+		if r.y < 0.0:
+			break
+		if i % 2 == 0:
+			_place("pottedPlant", r, rng.randf_range(0, 360))
+		else:
+			_place_from(NATURE, "plant_bushLarge", r, rng.randf_range(0, 360), Vector3.ONE * 1.4)
+
+
+## Gerahmtes Bild an der Wand (Kenney-Emote als Motiv)
+func _poster(pos: Vector3, rot_y: float, img: String, wall_list: Array) -> void:
+	var holder := Node3D.new()
+	holder.position = pos
+	holder.rotation_degrees.y = rot_y
+	holder.scale = Vector3.ONE * 1.5
+	world.add_child(holder)
+	var frame := MeshInstance3D.new()
+	var fm := BoxMesh.new()
+	fm.size = Vector3(0.36, 0.3, 0.02)
+	frame.mesh = fm
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color("5a4634")
+	frame.material_override = mat
+	holder.add_child(frame)
+	var bg := MeshInstance3D.new()
+	var bgm := BoxMesh.new()
+	bgm.size = Vector3(0.3, 0.24, 0.005)
+	bg.mesh = bgm
+	var bmat := StandardMaterial3D.new()
+	bmat.albedo_color = Color("f1ece2")
+	bg.material_override = bmat
+	bg.position = Vector3(0, 0, 0.012)
+	holder.add_child(bg)
+	var sp := Sprite3D.new()
+	var tex: Texture2D = load(EMOTES + img + ".png")
+	sp.texture = tex
+	sp.pixel_size = 0.17 / maxf(1.0, tex.get_width())
+	sp.position = Vector3(0, 0, 0.016)
+	holder.add_child(sp)
+	wall_list.append(holder)
 
 
 func _add_person(p: Dictionary, pos: Vector3) -> void:

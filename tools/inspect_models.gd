@@ -1,7 +1,7 @@
 extends SceneTree
 ## Gibt Größe (AABB) und Animationen der Kenney-Modelle aus.
 func _init() -> void:
-	for dir in ["res://assets/kenney/nature/", "res://assets/kenney/cars/"]:
+	for dir in ["res://assets/kenney/furniture/"]:
 		for f in DirAccess.get_files_at(dir):
 			if not f.ends_with(".glb"):
 				continue

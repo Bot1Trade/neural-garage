@@ -152,3 +152,4 @@ Kaffeebar (+10 % Forschung) · Konferenzräume (+Qualität) · Fitness & Ruherau
 - Büro: steht auf einem Gelände (Garage = Einfahrt mit Auto, Tech-Tower = Dachterrasse, sonst Rasen mit Bäumen hinter den Wänden und Blumen davor). Boden im Schachbrett, warme Raumlichter, leuchtende Monitore.
 - Leben: Mit Kaffeebar holen sich Leute regelmäßig Kaffee (laufen über den Gang und zurück).
 - Welt: ~60 Bäume und Pflanzen, 12 Autos fahren rechts auf den Straßen.
+- Deko-Update: Kleinkram auf Schreibtischen, Wandverkleidung und gerahmte Bilder, Garderobe, Regale, Kühlschrank, Serverecke mit Doppelboden und Racks mit LED-Matrix. Eine Belegungskarte (0,5-m-Raster) füllt freie Flächen automatisch mit Besprechungsecke, Lounge-Sesseln und Pflanzen. Tilt-Shift-Unschärfe (Miniatur-Look). Welt mit Park, Parkplatz und Skyline.
