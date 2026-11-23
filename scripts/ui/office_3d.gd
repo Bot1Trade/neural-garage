@@ -271,8 +271,9 @@ func _pan_pixels(rel: Vector2) -> void:
 	var pitch_sin := 11.0 / sqrt(11.0 * 11.0 + 14.0 * 14.0)
 	var delta := -right * rel.x * upp + away * rel.y * upp / pitch_sin
 	pan_t += delta
-	pan += delta
 	_clamp_pan()
+	pan = pan_t          # beim Ziehen direkt folgen (Welt klebt am Zeiger)
+	_update_camera()
 
 
 func _zoom_at(factor: float, screen_pos: Vector2) -> void:

@@ -24,6 +24,27 @@ func _init() -> void:
 	_wheel(MOUSE_BUTTON_WHEEL_DOWN, center)
 	check(ov.zoom_t > z0, "Mausrad runter zoomt raus")
 
+	# Nach dem Zoom ausruhen lassen, dann ziehen: die ECHTE Kamera muss sich sofort bewegen
+	for i in range(90):
+		await process_frame
+	var cam0: Vector3 = ov.camera.position
+	_button(MOUSE_BUTTON_LEFT, true, center)
+	for i in range(5):
+		_motion(center + Vector2(10 * (i + 1), 0), Vector2(10, 0))
+	check(ov.camera.position.distance_to(cam0) > 0.01, "Ziehen bewegt die Kamera sofort (ohne Zoom)")
+	await process_frame
+	await process_frame
+	check(ov.camera.position.distance_to(cam0) > 0.01, "Kamera bleibt nach Ziehen verschoben")
+	_button(MOUSE_BUTTON_LEFT, false, center)
+	for i in range(30):
+		await process_frame
+	var cam1: Vector3 = ov.camera.position
+	_button(MOUSE_BUTTON_RIGHT, true, center)
+	_motion(center + Vector2(40, 0), Vector2(40, 0))
+	_button(MOUSE_BUTTON_RIGHT, false, center)
+	for i in range(30):
+		await process_frame
+	check(ov.camera.position.distance_to(cam1) > 0.05, "Drehen bewegt die Kamera")
 	var p0: Vector3 = ov.pan_t
 	_button(MOUSE_BUTTON_LEFT, true, center)
 	for i in range(10):
