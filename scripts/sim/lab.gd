@@ -7,7 +7,7 @@ const D = preload("res://scripts/sim/data.gd")
 const SAVE_KEYS := ["day", "money", "total_revenue", "reputation", "equity", "office", "staff", "candidates",
 	"gpus", "techs", "rp", "models", "training", "data_unlocked", "flags", "cooldowns", "rival", "goal_index",
 	"investor_stage", "investor_next_day", "broke_days", "best_rating", "best_q", "gpu_price_mult",
-	"gpu_shortage_days", "ending", "news", "news_total", "office_upgrades", "datacenters", "chip_version", "chip_project", "custom_chip", "has_fab", "event_queue", "next_model_id", "era_index"]
+	"gpu_shortage_days", "ending", "news", "news_total", "ledger_days", "ledger_today", "ledger_year", "ledger_last_year", "money_hist", "office_upgrades", "datacenters", "chip_version", "chip_project", "custom_chip", "has_fab", "event_queue", "next_model_id", "era_index"]
 const INT_KEYS := ["day", "office", "goal_index", "investor_stage", "investor_next_day", "broke_days",
 	"gpu_shortage_days", "next_model_id", "era_index", "news_total", "chip_version"]
 
@@ -49,6 +49,11 @@ var chip_version: int = 0
 var chip_project: Dictionary = {}     # {progress, version}
 var custom_chip: Dictionary = {}      # {name, power, base}  (base = Tagesmiete-Äquivalent bei Fertigstellung)
 var has_fab: bool = false
+var ledger_days: Array = []          # letzte 30 Tage: [{kategorie: betrag}]
+var ledger_today: Dictionary = {}
+var ledger_year: Dictionary = {}       # laufendes Jahr
+var ledger_last_year: Dictionary = {}
+var money_hist: Array = []             # Kontostand alle 7 Tage (2 Jahre)
 var fx: Array = []                    # Effekte für die 3D-Ansicht (nicht gespeichert)
 var revision: int = 0           # steigt bei Strukturänderungen → UI baut Listen neu
 var last_income: float = 0.0
@@ -95,7 +100,7 @@ func expected_quality(at_day: int = -1) -> float:
 	return lerpf(D.EXPECTED_BY_YEAR[i], D.EXPECTED_BY_YEAR[i + 1], clampf(y - i, 0.0, 1.0))
 
 func market() -> float:
-	return pow(1.45, minf(years(), 10.0)) * pow(1.15, maxf(0.0, years() - 10.0))
+	return pow(1.25, minf(years(), 10.0)) * pow(1.06, maxf(0.0, years() - 10.0))
 
 func inflation() -> float:
 	return pow(1.05, years())
@@ -117,7 +122,7 @@ func gpu_power(gen: int) -> float:
 	return pow(2.0, gen - 1)
 
 func gpu_cost(gen: int) -> float:
-	return 25.0 * pow(1.55, gen - 1) * gpu_price_mult
+	return 25.0 * pow(1.3, gen - 1) * gpu_price_mult
 
 func gpu_count() -> int:
 	var n := 0
@@ -167,7 +172,7 @@ func engineer_mult() -> float:
 	return m
 
 func sales_mult() -> float:
-	return 1.0 + 0.04 * role_skill("sales")
+	return minf(1.8, 1.0 + 0.04 * role_skill("sales"))
 
 func safety_reduction() -> float:
 	return minf(0.5, 0.04 * role_skill("safety"))
@@ -358,7 +363,7 @@ func start_training(d: Dictionary) -> String:
 		return "Das Training würde über ein Jahr dauern. Mehr GPUs oder ein kleineres Modell."
 	if money < ev["data_cost"]:
 		return "Nicht genug Geld für die Daten."
-	money -= ev["data_cost"]
+	book("data", -(ev["data_cost"]))
 	training = {"design": d.duplicate(true), "q": ev["q"], "risk": ev["risk"], "legal": ev["legal"],
 		"gpu_days": ev["gpu_days"], "progress": 0.0, "phase": "train", "eval_left": int(d["eval_days"]), "start_day": day}
 	if "gray" in d["data"]:
@@ -447,11 +452,11 @@ func release_model(id: int, kind: String) -> Dictionary:
 	if rep_gain > 0.0:
 		rep_gain *= pow(1.0 - reputation / 100.0, 1.5)
 	reputation = clampf(reputation + rep_gain, 0.0, 100.0)
-	money += money_gain
+	book("grant", (money_gain))
 	var fine := 0.0
 	if flags.get("regulation", false) and kind != "paper" and int(m["eval_days"]) < 14:
 		fine = 20000.0 * market()
-		money -= fine
+		book("fines", -(fine))
 	var report := {"name": m["name"], "kind": kind, "rating": rating, "rep_gain": rep_gain, "money_gain": money_gain,
 		"quotes": _quotes(rating), "feedback": _feedback(m["focus"]), "rival_q": rival["best_q"], "q": m["q"], "fine": fine}
 	var kind_name: String = {"paper": "als Paper", "api": "als API", "open": "mit offenen Gewichten"}[kind]
@@ -470,7 +475,7 @@ func withdraw_model(id: int) -> void:
 
 func model_revenue(m: Dictionary) -> float:
 	var rel: float = float(m["q"]) / expected_quality()
-	return 1000.0 * pow(minf(rel, 2.0), 2.0) * float(m["fit"]) * (0.3 + reputation / 60.0) * sales_mult() * market()
+	return 1600.0 * pow(minf(rel, 2.0), 2.0) * float(m["fit"]) * (0.3 + reputation / 60.0) * sales_mult() * market()
 
 func api_revenue() -> float:
 	var list := []
@@ -541,7 +546,7 @@ func hire(index: int) -> String:
 	var bonus := float(p["salary"]) * 0.1
 	if money < bonus:
 		return "Nicht genug Geld für den Einstellungsbonus."
-	money -= bonus
+	book("hire", -(bonus))
 	staff.append(p)
 	candidates.remove_at(index)
 	fx.append("hire")
@@ -553,7 +558,7 @@ func fire(index: int) -> void:
 	if index <= 0 or index >= staff.size():
 		return  # Mitgründung bleibt
 	var p: Dictionary = staff[index]
-	money -= float(p["salary"]) / 12.0
+	book("hire", -(float(p["salary"]) / 12.0))
 	staff.remove_at(index)
 	_news("%s hat das Team verlassen (Abfindung bezahlt)." % p["name"])
 	revision += 1
@@ -594,7 +599,7 @@ func buy_office(index: int) -> String:
 	var o: Dictionary = D.OFFICES[index]
 	if money < float(o["cost"]):
 		return "Nicht genug Geld."
-	money -= float(o["cost"])
+	book("building", -(float(o["cost"])))
 	office = index
 	_news("Umzug: Willkommen im [b]%s[/b]!" % o["name"])
 	revision += 1
@@ -608,7 +613,7 @@ func buy_office_upgrade(id: String) -> String:
 		return "Braucht mindestens: %s" % D.OFFICES[int(u["min_office"])]["name"]
 	if money < float(u["cost"]):
 		return "Nicht genug Geld."
-	money -= float(u["cost"])
+	book("building", -(float(u["cost"])))
 	office_upgrades[id] = true
 	_news("Neu im Büro: [b]%s[/b]." % u["name"])
 	revision += 1
@@ -687,7 +692,7 @@ func build_datacenter(type_id: String, loc_id: String) -> String:
 	var cost := dc_build_cost(type_id, loc_id)
 	if money < cost:
 		return "Nicht genug Geld."
-	money -= cost
+	book("building", -(cost))
 	datacenters.append({"type": type_id, "loc": loc_id, "upgrades": {}, "hw": []})
 	fx.append("build")
 	_news("[color=#7fd]Bau:[/color] %s in %s ist in Betrieb." % [t["name"], _find(D.LOCATIONS, loc_id)["name"]])
@@ -705,7 +710,7 @@ func buy_dc_upgrade(dc_index: int, up_id: String) -> String:
 	var cost := dc_upgrade_cost(dc, up_id)
 	if money < cost:
 		return "Nicht genug Geld."
-	money -= cost
+	book("building", -(cost))
 	dc["upgrades"][up_id] = true
 	if u.has("rep"):
 		reputation = minf(100.0, reputation + float(u["rep"]))
@@ -736,7 +741,7 @@ func buy_hardware(dc_index: int, kind: String, n: int) -> String:
 	n = mini(n, int(money / float(u["price"])))
 	if n <= 0:
 		return "Nicht genug Geld."
-	money -= float(u["price"]) * n
+	book("hardware", -(float(u["price"]) * n))
 	for h in dc["hw"]:
 		if h["name"] == u["name"]:
 			h["count"] = int(h["count"]) + n
@@ -759,7 +764,7 @@ func scrap_hardware(dc_index: int, n: int) -> void:
 	revision += 1
 
 func chip_project_cost() -> float:
-	return D.CHIP_BASE_COST * pow(1.6, chip_version) * inflation()
+	return D.CHIP_BASE_COST * pow(1.5, chip_version) * inflation()
 
 func chip_project_days() -> float:
 	return D.CHIP_DAYS / engineer_mult()
@@ -772,7 +777,7 @@ func start_chip_project() -> String:
 	var cost := chip_project_cost()
 	if money < cost:
 		return "Nicht genug Geld."
-	money -= cost
+	book("chips", -(cost))
 	chip_project = {"progress": 0.0, "version": chip_version + 1}
 	_news("Chip-Projekt [b]NG-%d[/b] gestartet." % (chip_version + 1))
 	revision += 1
@@ -799,7 +804,7 @@ func build_fab() -> String:
 	var cost := D.FAB_COST * inflation()
 	if money < cost:
 		return "Nicht genug Geld."
-	money -= cost
+	book("building", -(cost))
 	has_fab = true
 	reputation = minf(100.0, reputation + 3.0)
 	_news("[color=#7fd]Eigene Chipfabrik eröffnet![/color] Chips halb so teuer, keine Lieferengpässe mehr.")
@@ -833,7 +838,7 @@ func resolve_event(choice: int) -> void:
 		"investor":
 			var inv: Dictionary = D.INVESTORS[investor_stage]
 			if choice == 0:
-				money += float(inv["money"])
+				book("invest", (float(inv["money"])))
 				equity -= equity * float(inv["equity"]) / 100.0
 				investor_stage += 1
 				investor_next_day = day + 90
@@ -842,7 +847,7 @@ func resolve_event(choice: int) -> void:
 				investor_next_day = day + 120
 		"rescue":
 			if choice == 0:
-				money += float(data["amount"])
+				book("invest", (float(data["amount"])))
 				equity *= 0.8
 		"gray_offer":
 			if choice == 0:
@@ -860,13 +865,13 @@ func resolve_event(choice: int) -> void:
 		"lawsuit":
 			var cost: float = data["cost"]
 			if choice == 0:
-				money -= cost
+				book("fines", -(cost))
 				_news("Vergleich: %s gezahlt." % fmt_money(cost))
 			elif rng.randf() < (0.25 if flags.get("denied", false) else 0.5):
 				reputation = minf(100.0, reputation + 3.0)
 				_info("Prozess gewonnen", "Das Gericht sieht keine ausreichenden Beweise. Glück gehabt.")
 			else:
-				money -= cost * 3.0
+				book("fines", -(cost * 3.0))
 				reputation = maxf(0.0, reputation - 10.0)
 				_info("Prozess verloren", "Das Gericht verurteilt dein Labor zu %s Schadensersatz." % fmt_money(cost * 3.0))
 		"poach":
@@ -888,7 +893,7 @@ func resolve_event(choice: int) -> void:
 				flags["regulation"] = true
 				_news("Neues Gesetz: API-Modelle brauchen mindestens 14 Tage Sicherheits-Evaluierung.")
 			else:
-				money -= 300000.0 * inflation()
+				book("fines", -(300000.0 * inflation()))
 				flags["lobby"] = true
 		"jailbreak":
 			var m := get_model(int(data["model"]))
@@ -896,7 +901,7 @@ func resolve_event(choice: int) -> void:
 				if choice == 0:
 					withdraw_model(int(m["id"]))
 				elif choice == 1:
-					money -= float(data["cost"])
+					book("other", -(float(data["cost"])))
 					m["risk"] = float(m["risk"]) * 0.6
 				else:
 					reputation = maxf(0.0, reputation - 5.0)
@@ -1035,7 +1040,10 @@ func step_day() -> void:
 		fx.clear()
 	last_cost = daily_salaries() + daily_gpu_cost() + daily_dc_cost()
 	last_income = api_revenue()
-	money += last_income - last_cost
+	book("api", last_income)
+	book("salary", -daily_salaries())
+	book("rent", -daily_gpu_cost())
+	book("dc", -daily_dc_cost())
 	total_revenue += last_income
 	rp += rp_per_day()
 	if day - _last_release_day() > 180:
@@ -1051,6 +1059,7 @@ func step_day() -> void:
 	if day % 180 == 0:
 		_grow_staff()
 	_check_endings()
+	_close_ledger_day()
 
 func _step_risk() -> void:
 	var hr := hidden_risk()
@@ -1059,7 +1068,7 @@ func _step_risk() -> void:
 		var rep_loss := clampf(4.0 + sev * 3.0, 4.0, 30.0)
 		var fine := 3000.0 * market() * sev
 		reputation = maxf(0.0, reputation - rep_loss)
-		money -= fine
+		book("fines", -(fine))
 		flags["incidents"] = int(flags.get("incidents", 0)) + 1
 		fx.append("incident")
 		if hr >= 8.0 and rng.randf() < 0.25:
@@ -1132,7 +1141,7 @@ func goal_done(id: String) -> bool:
 func _step_goals() -> void:
 	while goal_index < D.GOALS.size() and goal_done(D.GOALS[goal_index]["id"]):
 		var reward := 5000.0 * market()
-		money += reward
+		book("reward", (reward))
 		reputation = minf(100.0, reputation + 1.0)
 		_news("[color=#9f9]Ziel erreicht:[/color] %s (+%s, +1 Reputation)" % [D.GOALS[goal_index]["text"], fmt_money(reward)])
 		goal_index += 1
@@ -1174,6 +1183,36 @@ func score() -> int:
 	if ending.get("id", "") == "aligned":
 		s *= 2.0
 	return int(s)
+
+
+# ---------------------------------------------------------------- Kassenbuch
+
+## Jede Geldbewegung läuft hier durch → Finanz-Übersicht
+func book(cat: String, amount: float) -> void:
+	money += amount
+	ledger_today[cat] = float(ledger_today.get(cat, 0.0)) + amount
+	ledger_year[cat] = float(ledger_year.get(cat, 0.0)) + amount
+
+func _close_ledger_day() -> void:
+	ledger_days.append(ledger_today)
+	ledger_today = {}
+	if ledger_days.size() > 30:
+		ledger_days.pop_front()
+	if day % 7 == 0:
+		money_hist.append(money)
+		if money_hist.size() > 104:
+			money_hist.pop_front()
+	if day % 365 == 0:
+		ledger_last_year = ledger_year
+		ledger_year = {}
+
+## Summe je Kategorie der letzten 30 Tage
+func ledger_month() -> Dictionary:
+	var out := {}
+	for dd in ledger_days:
+		for k in dd:
+			out[k] = float(out.get(k, 0.0)) + float(dd[k])
+	return out
 
 
 # ---------------------------------------------------------------- Hilfen & Speichern

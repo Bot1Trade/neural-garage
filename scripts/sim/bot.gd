@@ -26,7 +26,7 @@ static func manage(lab) -> void:
 	var burn: float = lab.last_cost - lab.last_income
 	var runway: float = lab.money / maxf(1.0, burn)
 	# Einstellen, wenn das Geld reicht
-	if lab.staff.size() < int(lab.office_data()["staff"]) and (burn <= 0.0 or runway > 120.0) and lab.candidates.size() > 0:
+	if lab.staff.size() < int(lab.office_data()["staff"]) and (burn < -lab.last_cost * 0.1 or runway > 400.0) and lab.candidates.size() > 0:
 		var counts := {}
 		for p in lab.staff:
 			counts[p["role"]] = int(counts.get(p["role"], 0)) + 1
@@ -43,7 +43,7 @@ static func manage(lab) -> void:
 		lab.hire(pick)
 	# GPUs nach Budget
 	var free: int = int(lab.office_data()["gpus"]) - lab.gpu_count()
-	var budget: float = 0.6 * lab.last_income + lab.money / 730.0 - lab.daily_gpu_cost()
+	var budget: float = 0.5 * lab.last_income - lab.daily_salaries() * 0.5 + lab.money / 1000.0 - lab.daily_gpu_cost()
 	var unit: float = lab.gpu_cost(lab.gpu_gen_now())
 	if free > 0 and budget > unit:
 		lab.rent_gpus(mini(free, int(budget / unit)))

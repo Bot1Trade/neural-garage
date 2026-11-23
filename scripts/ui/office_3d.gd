@@ -6,6 +6,7 @@ extends Control
 const D = preload("res://scripts/sim/data.gd")
 
 signal fx_event(fx_name: String)   # für Sounds
+signal clicked_ground(pos: Vector3) # Linksklick ohne Ziehen (Grundstücke)
 const FURN := "res://assets/kenney/furniture/"
 const CHARS := "res://assets/kenney/characters/"
 const CITY := "res://assets/kenney/city/"
@@ -69,12 +70,18 @@ var zoom := 1.0
 var pan := Vector3.ZERO
 var drag_rot := false
 var drag_pan := false
+var drag_moved := false
+var press_pos := Vector2.ZERO
+var yaw_t := 45.0
+var zoom_t := 1.0
+var pan_t := Vector3.ZERO
+var hover_ground := Vector3(0, -1000, 0)
 var walls_x: Array = []
 var walls_z: Array = []
 
 
 func _ready() -> void:
-	mouse_filter = Control.MOUSE_FILTER_STOP
+	mouse_filter = Control.MOUSE_FILTER_IGNORE   # Eingabe über _unhandled_input (UI hat Vorrang)
 	scene_root = Node3D.new()
 	add_child(scene_root)
 	world = Node3D.new()
@@ -162,44 +169,139 @@ func set_mode(m: String) -> void:
 	mode = m
 	build_key = ""
 	pan = Vector3.ZERO
+	pan_t = Vector3.ZERO
 	zoom = 1.0
+	zoom_t = 1.0
 
 
 # ------------------------------------------------------------------ Eingabe & Kamera
+# Mausrad = Zoom zum Mauszeiger · links/mitte ziehen = verschieben (Welt klebt am Zeiger)
+# rechts ziehen = drehen · WASD/Pfeile = verschieben · Q/E = 45° drehen · R = zurücksetzen
 
-func _gui_input(ev: InputEvent) -> void:
+func _unhandled_input(ev: InputEvent) -> void:
+	if not is_visible_in_tree():
+		return
 	if ev is InputEventMouseButton:
 		var mb := ev as InputEventMouseButton
-		if mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_UP:
-			zoom = clampf(zoom * 0.9, 0.3, 2.0)
-		elif mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			zoom = clampf(zoom * 1.1, 0.3, 2.0)
-		elif mb.button_index == MOUSE_BUTTON_RIGHT:
-			drag_rot = mb.pressed
-		elif mb.button_index in [MOUSE_BUTTON_MIDDLE, MOUSE_BUTTON_LEFT]:
-			drag_pan = mb.pressed
-		_update_camera()
+		match mb.button_index:
+			MOUSE_BUTTON_WHEEL_UP:
+				if mb.pressed:
+					_zoom_at(0.85, mb.position)
+			MOUSE_BUTTON_WHEEL_DOWN:
+				if mb.pressed:
+					_zoom_at(1.0 / 0.85, mb.position)
+			MOUSE_BUTTON_LEFT, MOUSE_BUTTON_MIDDLE:
+				if mb.pressed:
+					drag_pan = true
+					drag_moved = false
+					press_pos = mb.position
+				else:
+					if mb.button_index == MOUSE_BUTTON_LEFT and not drag_moved:
+						clicked_ground.emit(_ground_at(mb.position))
+					drag_pan = false
+			MOUSE_BUTTON_RIGHT:
+				drag_rot = mb.pressed
+		get_viewport().set_input_as_handled()
 	elif ev is InputEventMouseMotion:
 		var mm := ev as InputEventMouseMotion
 		if drag_rot:
-			yaw = fmod(yaw - mm.relative.x * 0.35, 360.0)
-			_update_camera()
+			yaw_t -= mm.relative.x * 0.3
+			get_viewport().set_input_as_handled()
 		elif drag_pan:
-			var k := camera.size / maxf(1.0, size.y)
-			var right := camera.global_transform.basis.x
-			var fwd := Vector3(-right.z, 0, right.x)
-			pan += (-right * mm.relative.x + fwd * mm.relative.y * 1.4) * k
-			_update_camera()
+			if mm.position.distance_to(press_pos) > 5.0:
+				drag_moved = true
+			if drag_moved:
+				_pan_pixels(mm.relative)
+				get_viewport().set_input_as_handled()
+		else:
+			hover_ground = _ground_at(mm.position)
+	elif ev is InputEventKey and ev.pressed and not ev.echo:
+		match ev.keycode:
+			KEY_Q:
+				yaw_t += 45.0
+			KEY_E:
+				yaw_t -= 45.0
+			KEY_R, KEY_HOME:
+				reset_view()
 
 
-func _unhandled_key_input(ev: InputEvent) -> void:
-	if ev is InputEventKey and ev.pressed:
-		if ev.keycode == KEY_Q:
-			yaw += 15.0
-			_update_camera()
-		elif ev.keycode == KEY_E:
-			yaw -= 15.0
-			_update_camera()
+func reset_view() -> void:
+	yaw_t = 45.0
+	zoom_t = 1.0
+	pan_t = Vector3.ZERO
+
+
+## Bildschirm-Pixel in Boden-Verschiebung umrechnen (isometrisch, orthografisch)
+func _pan_pixels(rel: Vector2) -> void:
+	var vh := maxf(1.0, get_viewport().get_visible_rect().size.y)
+	var upp := camera.size / vh                 # Welteinheiten pro Pixel
+	var r := deg_to_rad(yaw)
+	var right := Vector3(cos(r), 0, -sin(r))
+	var away := -Vector3(sin(r), 0, cos(r))     # Blickrichtung auf dem Boden
+	var pitch_sin := 11.0 / sqrt(11.0 * 11.0 + 14.0 * 14.0)
+	var delta := -right * rel.x * upp + away * rel.y * upp / pitch_sin
+	pan_t += delta
+	pan += delta
+	_clamp_pan()
+
+
+func _zoom_at(factor: float, screen_pos: Vector2) -> void:
+	var old_t := zoom_t
+	zoom_t = clampf(zoom_t * factor, 0.3, 2.2)
+	var f := zoom_t / old_t
+	var g := _ground_at(screen_pos)
+	if g.y > -100.0:
+		var c := cam_center + pan_t
+		pan_t += (g - c) * (1.0 - f)
+		pan_t.y = 0.0
+		_clamp_pan()
+
+
+func _clamp_pan() -> void:
+	var lim := cam_base_size * 0.9
+	pan_t = Vector3(clampf(pan_t.x, -lim, lim), 0, clampf(pan_t.z, -lim, lim))
+
+
+## Punkt auf dem Boden (y = 0) unter einer Bildschirmposition
+func _ground_at(screen_pos: Vector2) -> Vector3:
+	var o := camera.project_ray_origin(screen_pos)
+	var n := camera.project_ray_normal(screen_pos)
+	if absf(n.y) < 0.0001:
+		return Vector3(0, -1000, 0)
+	var t_hit := -o.y / n.y
+	return o + n * t_hit
+
+
+func _smooth_camera(delta: float) -> void:
+	var k := 1.0 - exp(-12.0 * delta)
+	var moved := false
+	var kb := Vector3.ZERO
+	var r := deg_to_rad(yaw)
+	var right := Vector3(cos(r), 0, -sin(r))
+	var away := -Vector3(sin(r), 0, cos(r))
+	if not get_viewport().gui_get_focus_owner() is LineEdit:
+		if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+			kb += away
+		if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+			kb -= away
+		if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+			kb += right
+		if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+			kb -= right
+	if kb != Vector3.ZERO:
+		pan_t += kb.normalized() * camera.size * 0.9 * delta
+		_clamp_pan()
+	if absf(yaw - yaw_t) > 0.05:
+		yaw = lerpf(yaw, yaw_t, k)
+		moved = true
+	if absf(zoom - zoom_t) > 0.0005:
+		zoom = lerpf(zoom, zoom_t, k)
+		moved = true
+	if pan.distance_to(pan_t) > 0.001:
+		pan = pan.lerp(pan_t, k)
+		moved = true
+	if moved:
+		_update_camera()
 
 
 func _update_camera() -> void:
@@ -233,6 +335,7 @@ func _process(delta: float) -> void:
 	if lab == null:
 		return
 	t += delta
+	_smooth_camera(delta)
 	var key := _scene_key()
 	if key != build_key:
 		build_key = key

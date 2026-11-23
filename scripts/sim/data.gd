@@ -20,29 +20,29 @@ const ROLES := {
 
 const OFFICES := [
 	{"name": "Garage", "staff": 4, "gpus": 8, "cost": 0.0, "desc": "Wo alles anfängt. Das WLAN reicht bis zur Hälfte."},
-	{"name": "Hinterhof-Büro", "staff": 7, "gpus": 24, "cost": 120000.0, "desc": "Zwei Räume, ein Drucker, viel Hoffnung."},
-	{"name": "Loft", "staff": 12, "gpus": 64, "cost": 350000.0, "desc": "Backsteinwände und ein Tischkicker. Investoren lieben es."},
-	{"name": "Tech-Tower-Etage", "staff": 20, "gpus": 256, "cost": 2000000.0, "desc": "Eine ganze Etage mit Blick über die Stadt."},
-	{"name": "Campus", "staff": 35, "gpus": 1024, "cost": 8000000.0, "desc": "Eigene Gebäude, eigene Kantine, eigener Ruf."},
-	{"name": "Mega-Campus", "staff": 60, "gpus": 4096, "cost": 120000000.0, "desc": "Eine kleine Stadt nur für dein Labor."},
+	{"name": "Hinterhof-Büro", "staff": 7, "gpus": 24, "cost": 80000.0, "desc": "Zwei Räume, ein Drucker, viel Hoffnung."},
+	{"name": "Loft", "staff": 12, "gpus": 64, "cost": 250000.0, "desc": "Backsteinwände und ein Tischkicker. Investoren lieben es."},
+	{"name": "Tech-Tower-Etage", "staff": 20, "gpus": 256, "cost": 1200000.0, "desc": "Eine ganze Etage mit Blick über die Stadt."},
+	{"name": "Campus", "staff": 35, "gpus": 1024, "cost": 5000000.0, "desc": "Eigene Gebäude, eigene Kantine, eigener Ruf."},
+	{"name": "Mega-Campus", "staff": 60, "gpus": 2048, "cost": 25000000.0, "desc": "Eine kleine Stadt nur für dein Labor."},
 ]
 
 ## Büro-Upgrades: einmal kaufen, gelten dauerhaft (auch nach Umzug)
 const OFFICE_UPGRADES := [
 	{"id": "coffee", "name": "Kaffeebar", "cost": 25000.0, "min_office": 1, "desc": "+10 % Forschungspunkte. Koffein ist auch eine Architektur."},
-	{"id": "meeting", "name": "Konferenzräume", "cost": 200000.0, "min_office": 2, "desc": "+0,04 Modellqualität-Faktor durch bessere Abstimmung."},
-	{"id": "gym", "name": "Fitness & Ruheraum", "cost": 900000.0, "min_office": 3, "desc": "Gehälter steigen halb so schnell, Abwerben wird seltener."},
-	{"id": "hwlab", "name": "Hardware-Labor", "cost": 3000000.0, "min_office": 3, "desc": "+10 % Trainingsleistung auf alle GPUs."},
-	{"id": "daycare", "name": "Kita", "cost": 6000000.0, "min_office": 4, "desc": "Bewerbungen sind im Schnitt eine Stufe besser."},
+	{"id": "meeting", "name": "Konferenzräume", "cost": 150000.0, "min_office": 2, "desc": "+0,04 Modellqualität-Faktor durch bessere Abstimmung."},
+	{"id": "gym", "name": "Fitness & Ruheraum", "cost": 500000.0, "min_office": 3, "desc": "Gehälter steigen halb so schnell, Abwerben wird seltener."},
+	{"id": "hwlab", "name": "Hardware-Labor", "cost": 1500000.0, "min_office": 3, "desc": "+10 % Trainingsleistung auf alle GPUs."},
+	{"id": "daycare", "name": "Kita", "cost": 3000000.0, "min_office": 4, "desc": "Bewerbungen sind im Schnitt eine Stufe besser."},
 ]
 
 ## Eigene Rechenzentren: Hardware kaufen statt mieten → nur Strom zahlen
 const BUY_DAYS := 250.0          # Kaufpreis = so viele Tage Miete
 const UPKEEP_SHARE := 0.12       # Strom/Wartung pro Tag = Anteil der Tagesmiete
 const DATACENTERS := [
-	{"id": "colo", "name": "Server-Raum (Colocation)", "slots": 512, "cost": 1500000.0, "base": 1500.0, "year": 2018, "desc": "Ein gemieteter Käfig in einem fremden Rechenzentrum."},
-	{"id": "dc", "name": "Rechenzentrum", "slots": 8192, "cost": 40000000.0, "base": 25000.0, "year": 2020, "desc": "Dein eigenes Gebäude voller Server."},
-	{"id": "hyper", "name": "Hyperscale-Campus", "slots": 131072, "cost": 900000000.0, "base": 350000.0, "year": 2023, "desc": "Strombedarf einer Kleinstadt. Eigener Netzanschluss."},
+	{"id": "colo", "name": "Server-Raum (Colocation)", "slots": 512, "cost": 600000.0, "base": 600.0, "year": 2018, "desc": "Ein gemieteter Käfig in einem fremden Rechenzentrum."},
+	{"id": "dc", "name": "Rechenzentrum", "slots": 8192, "cost": 6000000.0, "base": 5000.0, "year": 2020, "desc": "Dein eigenes Gebäude voller Server."},
+	{"id": "hyper", "name": "Hyperscale-Campus", "slots": 131072, "cost": 50000000.0, "base": 30000.0, "year": 2023, "desc": "Strombedarf einer Kleinstadt. Eigener Netzanschluss."},
 ]
 const LOCATIONS := [
 	{"id": "fra", "name": "Frankfurt", "power": 1.3, "build": 1.0, "desc": "Teurer Strom, aber nah dran."},
@@ -57,11 +57,11 @@ const DC_UPGRADES := [
 ]
 
 ## Eigene Chips
-const CHIP_BASE_COST := 15000000.0   # erstes Chip-Projekt, jedes weitere ×1,6
+const CHIP_BASE_COST := 4000000.0   # erstes Chip-Projekt, jedes weitere ×1,6
 const CHIP_DAYS := 300.0             # Entwicklungsdauer (Engineering beschleunigt)
 const CHIP_POWER := 2.2              # Leistung relativ zur Markt-GPU bei Fertigstellung (schlägt auch die nächste Generation)
 const CHIP_PRICE := 0.6              # Preis relativ zur Markt-GPU (mit Fabrik: ×0,5 zusätzlich)
-const FAB_COST := 1500000000.0
+const FAB_COST := 120000000.0
 
 const FOCUS_KEYS := ["help", "code", "creative", "safety"]
 ## Fokus-Punkte pro Modell. Mehr in einen Bereich = weniger in die anderen. Ungenutzte Punkte kosten Qualität.
@@ -107,11 +107,11 @@ const TECHS := [
 ## Investoren-Runden: Reputation nötig, Geld gegen Anteile
 const INVESTORS := [
 	{"name": "Angel-Investorin", "rep": 0.0, "year": 2016, "money": 150000.0, "equity": 8.0},
-	{"name": "Seed-Runde", "rep": 12.0, "year": 2017, "money": 700000.0, "equity": 10.0},
-	{"name": "Series A", "rep": 28.0, "year": 2018, "money": 4000000.0, "equity": 15.0},
-	{"name": "Series B", "rep": 45.0, "year": 2020, "money": 30000000.0, "equity": 15.0},
-	{"name": "Series C", "rep": 62.0, "year": 2022, "money": 250000000.0, "equity": 12.0},
-	{"name": "Series D", "rep": 78.0, "year": 2024, "money": 1500000000.0, "equity": 10.0},
+	{"name": "Seed-Runde", "rep": 12.0, "year": 2017, "money": 600000.0, "equity": 10.0},
+	{"name": "Series A", "rep": 28.0, "year": 2018, "money": 3000000.0, "equity": 15.0},
+	{"name": "Series B", "rep": 45.0, "year": 2020, "money": 12000000.0, "equity": 15.0},
+	{"name": "Series C", "rep": 62.0, "year": 2022, "money": 40000000.0, "equity": 12.0},
+	{"name": "Series D", "rep": 78.0, "year": 2024, "money": 120000000.0, "equity": 10.0},
 ]
 
 ## Gewichtung, wenn mehrere API-Modelle parallel laufen (sie kannibalisieren sich)

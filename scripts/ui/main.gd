@@ -91,6 +91,7 @@ var modal_buttons: VBoxContainer
 
 
 func _ready() -> void:
+	mouse_filter = Control.MOUSE_FILTER_IGNORE   # Kamera bekommt Maus-Events über _unhandled_input
 	audio = Audio.new()
 	add_child(audio)
 	theme = _make_theme()
