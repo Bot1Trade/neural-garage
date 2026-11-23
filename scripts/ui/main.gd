@@ -726,7 +726,7 @@ func _build_research() -> void:
 	research_btns.clear()
 	research_rp_label = _label("", 16)
 	tab_research.add_child(research_rp_label)
-	tab_research.add_child(_label("Forschende erzeugen Punkte; Open-Weights-Modelle bringen Punkte aus der Community. Klick auf einen Knoten für Details.", 13, C_DIM))
+	tab_research.add_child(_wrap("Forschende erzeugen Punkte; Open-Weights-Modelle bringen Punkte aus der Community. Klick auf einen Knoten für Details.", C_DIM))
 	# Spalten-Köpfe
 	var cols := ["arch", "safety", "infra"]
 	var col_names := {"arch": "Architektur", "safety": "Sicherheit", "infra": "Infrastruktur"}
@@ -837,6 +837,7 @@ func _build_research() -> void:
 				research_btns.append({"btn": b, "cost": float(t["rp"])})
 				v.add_child(b)
 		tab_research.add_child(p)
+	_fit_texts(tab_research)
 
 
 func _build_products() -> void:
@@ -1194,6 +1195,8 @@ func _build_market() -> void:
 		tab_market.add_child(p)
 
 
+	_fit_texts(tab_market)
+
 func _build_finance() -> void:
 	_clear(tab_finance)
 	finance_day = lab.day
@@ -1291,6 +1294,8 @@ func _build_finance() -> void:
 		tab_finance.add_child(_label("%s: %s Einnahmen · %s Ausgaben · Saldo %s" % [pair[0], lab.fmt_money(a), lab.fmt_money(-b), lab.fmt_money(a + b)], 14, C_DIM))
 
 
+	_fit_texts(tab_finance)
+
 func _build_advisor() -> void:
 	_clear(tab_advisor)
 	advisor_day = lab.day
@@ -1323,6 +1328,8 @@ func _build_advisor() -> void:
 
 
 ## Wichtige Warnung ab und zu als Meldung
+	_fit_texts(tab_advisor)
+
 func _advisor_toast() -> void:
 	if lab.day - last_advice_toast < 45 or lab.day == advice_checked_day:
 		return
@@ -1571,6 +1578,7 @@ func _build_ui() -> void:
 	drawer.offset_bottom = -104
 	drawer.add_theme_stylebox_override("panel", _hud_style(Color(0.09, 0.1, 0.13, 0.94), 10))
 	drawer.visible = false
+	drawer.clip_contents = true
 	add_child(drawer)
 	var dv := VBoxContainer.new()
 	drawer.add_child(dv)
