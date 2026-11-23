@@ -1063,7 +1063,7 @@ func _build_goals() -> void:
 	for i in range(D.GOALS.size()):
 		var g: Dictionary = D.GOALS[i]
 		var l: Label
-		if i < lab.goal_index:
+		if lab.goal_reached(g["id"]):
 			l = _label("✔ " + g["text"], 14, C_GOOD)
 		elif i == lab.goal_index:
 			l = _label("► " + g["text"], 15, C_ACCENT)
@@ -1098,7 +1098,7 @@ func _check_modal() -> void:
 			audio.play("win" if lab.ending.get("id", "") == "aligned" else "lose")
 			var e: Dictionary = lab.ending
 			_show_modal(e["title"], "%s\n\n[b]Punkte: %d[/b]\nDatum: %s · Reputation %.0f · Bestes Modell: Qualität %.0f · Ziele: %d/%d" % [
-				e["text"], e["score"], e["date"], lab.reputation, lab.best_q, lab.goal_index, D.GOALS.size()], [{"label": "Neues Spiel", "tip": ""}])
+				e["text"], e["score"], e["date"], lab.reputation, lab.best_q, lab.goals_count(), D.GOALS.size()], [{"label": "Neues Spiel", "tip": ""}])
 		return
 	if lab.event_queue.is_empty():
 		if modal.visible:

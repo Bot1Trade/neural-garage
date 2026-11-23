@@ -7,7 +7,7 @@ const D = preload("res://scripts/sim/data.gd")
 const SAVE_KEYS := ["day", "money", "total_revenue", "reputation", "equity", "office", "staff", "candidates",
 	"gpus", "techs", "rp", "models", "training", "data_unlocked", "flags", "cooldowns", "rival", "goal_index",
 	"investor_stage", "investor_next_day", "broke_days", "best_rating", "best_q", "gpu_price_mult",
-	"gpu_shortage_days", "ending", "news", "news_total", "ledger_days", "ledger_today", "plots", "fab_plot", "last_feedback", "ledger_year", "ledger_last_year", "money_hist", "office_upgrades", "datacenters", "chip_version", "chip_project", "custom_chip", "has_fab", "event_queue", "next_model_id", "era_index"]
+	"gpu_shortage_days", "ending", "news", "news_total", "ledger_days", "ledger_today", "plots", "fab_plot", "office_hw", "last_feedback", "ledger_year", "ledger_last_year", "money_hist", "office_upgrades", "datacenters", "chip_version", "chip_project", "custom_chip", "has_fab", "event_queue", "next_model_id", "era_index"]
 const INT_KEYS := ["day", "office", "goal_index", "investor_stage", "investor_next_day", "broke_days",
 	"gpu_shortage_days", "next_model_id", "era_index", "news_total", "chip_version"]
 
@@ -51,6 +51,7 @@ var custom_chip: Dictionary = {}      # {name, power, base}  (base = Tagesmiete-
 var has_fab: bool = false
 var plots: Dictionary = {}            # Grundstück-ID -> "" (leer) | "dc" | "fab"
 var fab_plot: String = ""
+var office_hw: Array = []              # gekaufte GPUs im Büro
 var last_feedback: Array = []         # letztes Kritik-Feedback (für den Berater)
 var ledger_days: Array = []          # letzte 30 Tage: [{kategorie: betrag}]
 var ledger_today: Dictionary = {}
@@ -127,15 +128,13 @@ func gpu_power(gen: int) -> float:
 func gpu_cost(gen: int) -> float:
 	return 25.0 * pow(1.3, gen - 1) * gpu_price_mult
 
+## GPUs im Büro: gemietet + gekauft (teilen sich die Plätze)
 func gpu_count() -> int:
-	var n := 0
-	for g in gpus:
-		n += int(g["count"])
-	return n
+	return rented_count() + hw_count(office_hw)
 
-## Gesamte Rechenleistung: gemietete GPUs im Büro + eigene Hardware in Rechenzentren
+## Gesamte Rechenleistung: gemietete + eigene Büro-GPUs + Rechenzentren
 func compute_power() -> float:
-	return rented_power() + dc_total_power()
+	return rented_power() + hw_power(office_hw) + dc_total_power()
 
 func rented_power() -> float:
 	var p := 0.0
@@ -159,7 +158,7 @@ func role_skill(role: String) -> float:
 	var s := 0.0
 	for p in staff:
 		if p["role"] == role:
-			s += float(p["skill"])
+			s += eff_skill(p)
 	return s
 
 func team_quality() -> float:
@@ -181,7 +180,10 @@ func safety_reduction() -> float:
 	return minf(0.5, 0.04 * role_skill("safety"))
 
 func can_see_risk() -> bool:
-	return role_skill("safety") > 0.0
+	for p in staff:
+		if p["role"] == "safety":
+			return true
+	return false
 
 func daily_salaries() -> float:
 	var s := 0.0
@@ -190,7 +192,7 @@ func daily_salaries() -> float:
 	return s
 
 func rp_per_day() -> float:
-	var r := 0.12 * role_skill("research")
+	var r := 0.16 * role_skill("research")
 	if office_upgrades.has("coffee"):
 		r *= 1.1
 	for m in models:
@@ -437,6 +439,9 @@ func release_model(id: int, kind: String) -> Dictionary:
 	m["rating"] = rating
 	m["fit"] = fit
 	m["status"] = kind
+	if kind == "api":
+		m["fit"] = fit
+		m["users"] = target_users(m) * (0.4 if rating >= 8.0 else 0.25)   # Start-Hype
 	m["release_day"] = day
 	best_rating = maxf(best_rating, rating)
 	best_q = maxf(best_q, float(m["q"]))
@@ -474,23 +479,57 @@ func withdraw_model(id: int) -> void:
 	var m := get_model(id)
 	if not m.is_empty() and m["status"] == "api":
 		m["status"] = "withdrawn"
+		m["users"] = 0.0
 		_news("%s wurde vom Markt genommen." % m["name"])
 		revision += 1
 
-func model_revenue(m: Dictionary) -> float:
-	var rel: float = float(m["q"]) / expected_quality()
-	return 1600.0 * pow(minf(rel, 2.0), 2.0) * float(m["fit"]) * (0.3 + reputation / 60.0) * sales_mult() * market()
+# ---- Beliebtheit & Nutzer
 
-func api_revenue() -> float:
-	var list := []
+func market_users() -> float:
+	return D.MARKET_USERS * market()
+
+## Attraktivität eines Modells: Qualität relativ zum Markt (gedämpft) × passender Fokus
+func model_appeal(m: Dictionary) -> float:
+	var rel: float = float(m["q"]) / expected_quality()
+	return pow(clampf(rel, 0.05, 2.5), 1.6) * float(m["fit"])
+
+func _total_appeal() -> float:
+	var rival_rel: float = float(rival["best_q"]) / expected_quality()
+	var total := pow(clampf(rival_rel, 0.3, 2.0), 1.6) + D.OTHER_APPEAL
 	for m in models:
 		if m["status"] == "api":
-			list.append(model_revenue(m))
-	list.sort()
-	list.reverse()
+			total += model_appeal(m)
+	return total
+
+## Wie viele Nutzer das Modell langfristig gewinnen kann
+func target_users(m: Dictionary, total := -1.0) -> float:
+	if total < 0.0:
+		total = _total_appeal()
+	return market_users() * model_appeal(m) / total * (0.55 + reputation / 110.0) * sales_mult()
+
+func _step_users() -> void:
+	var total := _total_appeal()
+	for m in models:
+		if m["status"] != "api":
+			continue
+		var target := target_users(m, total)
+		var u := float(m.get("users", 0.0))
+		u += (target - u) * (D.USER_GROWTH if target > u else D.USER_DECAY)
+		m["users"] = u
+
+## Beliebtheit = Marktanteil in Prozent
+func popularity(m: Dictionary) -> float:
+	return float(m.get("users", 0.0)) / maxf(1.0, market_users()) * 100.0
+
+func model_revenue(m: Dictionary) -> float:
+	if m["status"] != "api":
+		return 0.0
+	return float(m.get("users", 0.0)) * D.ARPU
+
+func api_revenue() -> float:
 	var total := 0.0
-	for i in range(list.size()):
-		total += list[i] * (D.STACK_WEIGHTS[i] if i < D.STACK_WEIGHTS.size() else 0.02)
+	for m in models:
+		total += model_revenue(m)
 	return total
 
 func hidden_risk() -> float:
@@ -661,10 +700,7 @@ func dc_perf(dc: Dictionary) -> float:
 	return 1.15 if dc["upgrades"].has("network") else 1.0
 
 func dc_power(dc: Dictionary) -> float:
-	var p := 0.0
-	for h in dc["hw"]:
-		p += float(h["power"]) * int(h["count"])
-	return p * dc_perf(dc)
+	return hw_power(dc["hw"]) * dc_perf(dc)
 
 func dc_total_power() -> float:
 	var p := 0.0
@@ -778,6 +814,14 @@ func hw_unit(kind: String) -> Dictionary:
 func buy_hardware(dc_index: int, kind: String, n: int) -> String:
 	var dc: Dictionary = datacenters[dc_index]
 	n = mini(n, dc_slots(dc) - dc_used(dc))
+	if n > 0 and not hw_unit(kind).is_empty():
+		n = mini(n, int(money / float(hw_unit(kind)["price"])))
+		if n <= 0:
+			return "Nicht genug Geld."
+		book("hardware", -(float(hw_unit(kind)["price"]) * n))
+		_hw_add(dc["hw"], hw_unit(kind), n)
+		revision += 1
+		return ""
 	if n <= 0:
 		return "Rechenzentrum ist voll."
 	var u := hw_unit(kind)
@@ -796,17 +840,9 @@ func buy_hardware(dc_index: int, kind: String, n: int) -> String:
 	revision += 1
 	return ""
 
-## Schwächste Hardware zuerst verschrotten (kein Erlös, spart Strom und Platz)
-func scrap_hardware(dc_index: int, n: int) -> void:
-	var dc: Dictionary = datacenters[dc_index]
-	dc["hw"].sort_custom(func(a, b): return float(a["power"]) < float(b["power"]))
-	while n > 0 and dc["hw"].size() > 0:
-		var take := mini(n, int(dc["hw"][0]["count"]))
-		dc["hw"][0]["count"] = int(dc["hw"][0]["count"]) - take
-		n -= take
-		if int(dc["hw"][0]["count"]) <= 0:
-			dc["hw"].remove_at(0)
-	revision += 1
+## Schwächste Hardware zuerst verkaufen (Erlös je nach Alter und Zustand)
+func scrap_hardware(dc_index: int, n: int) -> float:
+	return _sell(datacenters[dc_index]["hw"], n)
 
 func chip_project_cost() -> float:
 	return D.CHIP_BASE_COST * pow(1.5, chip_version) * inflation()
@@ -924,6 +960,8 @@ func resolve_event(choice: int) -> void:
 				book("fines", -(cost * 3.0))
 				reputation = maxf(0.0, reputation - 10.0)
 				_info("Prozess verloren", "Das Gericht verurteilt dein Labor zu %s Schadensersatz." % fmt_money(cost * 3.0))
+		"raise":
+			_resolve_raise(data, choice)
 		"poach":
 			var idx: int = data["staff"]
 			if idx < staff.size():
@@ -1088,17 +1126,21 @@ func step_day() -> void:
 	day += 1
 	if fx.size() > 40:
 		fx.clear()
-	last_cost = daily_salaries() + daily_gpu_cost() + daily_dc_cost()
+	_step_users()
+	last_cost = daily_salaries() + daily_gpu_cost() + daily_dc_cost() + daily_office_power()
 	last_income = api_revenue()
 	book("api", last_income)
 	book("salary", -daily_salaries())
 	book("rent", -daily_gpu_cost())
 	book("dc", -daily_dc_cost())
+	book("power", -daily_office_power())
 	total_revenue += last_income
 	rp += rp_per_day()
 	if day - _last_release_day() > 180:
 		reputation = maxf(0.0, reputation - 0.02)
 	_step_training()
+	_step_staff()
+	_step_hw()
 	_step_chip()
 	_step_risk()
 	_step_rival()
@@ -1140,28 +1182,30 @@ func _step_rival() -> void:
 	rival["best_q"] = maxf(float(rival["best_q"]), q)
 	rival["next_day"] = day + rng.randi_range(150, 260)
 	_news("[color=#f99]Helix Dynamics[/color] veröffentlicht Helix-%d (Qualität %.0f)." % [rival["count"], q])
-	if year() >= 2027 and q >= D.AGI_Q:
+	if year() >= D.RIVAL_AGI_YEAR and q >= D.AGI_Q:
 		_set_ending("rival_agi", "Helix war schneller",
 			"Helix Dynamics verkündet die erste AGI. Dein Labor wird über Nacht zur Fußnote der Geschichte.")
 
 func _grow_staff() -> void:
 	for p in staff:
 		if int(p["skill"]) < 10 and rng.randf() < 0.35:
-			p["skill"] = int(p["skill"]) + 1
-			p["salary"] = round(float(p["salary"]) * (1.04 if office_upgrades.has("gym") else 1.08))
+			p["skill"] = int(p["skill"]) + 1   # mehr Können → irgendwann ein Gehaltswunsch
 	revision += 1
 
 func _make_person(role: String, skill: int, salary_factor: float = 1.0) -> Dictionary:
 	var first: String = D.FIRST_NAMES[rng.randi() % D.FIRST_NAMES.size()]
 	var last: String = D.LAST_NAMES[rng.randi() % D.LAST_NAMES.size()]
-	var salary := (45000.0 + skill * 15000.0) * inflation() * salary_factor * rng.randf_range(0.9, 1.15)
-	return {"name": first + " " + last, "role": role, "skill": skill, "salary": round(salary)}
+	var salary := (D.SALARY_BASE + skill * D.SALARY_PER_SKILL) * inflation() * salary_factor * rng.randf_range(0.9, 1.15)
+	return {"name": first + " " + last, "role": role, "skill": skill, "salary": round(salary),
+		"energy": 100.0, "morale": 70.0, "vacation": 0, "next_raise": day + rng.randi_range(D.RAISE_MIN_DAYS, D.RAISE_MAX_DAYS)}
 
 func _refresh_candidates() -> void:
 	candidates.clear()
 	var max_skill := clampi(2 + int(reputation / 12.0) + (1 if office_upgrades.has("daycare") else 0), 2, 10)
 	for i in range(4):
 		var role: String = D.ROLE_ORDER[i] if i < 4 and rng.randf() < 0.5 else D.ROLE_ORDER[rng.randi() % 4]
+		if rng.randf() < 0.14:
+			role = "manager"
 		candidates.append(_make_person(role, rng.randi_range(maxi(1, max_skill - 3), max_skill)))
 	revision += 1
 
@@ -1188,15 +1232,34 @@ func goal_done(id: String) -> bool:
 		"agi": return ending.get("id", "") == "aligned"
 	return false
 
+## Ziele zählen in beliebiger Reihenfolge; goal_index = erstes offenes Ziel (für die Anzeige)
+func goal_reached(id: String) -> bool:
+	return flags.get("goals", {}).has(id)
+
+func goals_count() -> int:
+	return flags.get("goals", {}).size()
+
 func _step_goals() -> void:
-	while goal_index < D.GOALS.size() and goal_done(D.GOALS[goal_index]["id"]):
-		var reward := 5000.0 * market()
-		book("reward", (reward))
-		reputation = minf(100.0, reputation + 1.0)
-		_news("[color=#9f9]Ziel erreicht:[/color] %s (+%s, +1 Reputation)" % [D.GOALS[goal_index]["text"], fmt_money(reward)])
-		goal_index += 1
-		fx.append("goal")
-		revision += 1
+	if not flags.has("goals"):
+		var old := {}
+		for i in range(goal_index):   # alte Spielstände übernehmen
+			old[D.GOALS[i]["id"]] = true
+		flags["goals"] = old
+	var done: Dictionary = flags["goals"]
+	for g in D.GOALS:
+		if not done.has(g["id"]) and goal_done(g["id"]):
+			done[g["id"]] = day
+			var reward := 5000.0 * market()
+			book("reward", reward)
+			reputation = minf(100.0, reputation + 1.0)
+			_news("[color=#9f9]Ziel erreicht:[/color] %s (+%s, +1 Reputation)" % [g["text"], fmt_money(reward)])
+			fx.append("goal")
+			revision += 1
+	goal_index = D.GOALS.size()
+	for i in range(D.GOALS.size()):
+		if not done.has(D.GOALS[i]["id"]):
+			goal_index = i
+			break
 
 func _agi_ending(m: Dictionary) -> void:
 	if float(m["risk"]) < 1.0 and hidden_risk() < 3.0:
@@ -1229,10 +1292,284 @@ func _set_ending(id: String, title: String, text: String) -> void:
 	revision += 1
 
 func score() -> int:
-	var s := reputation * 1000.0 + best_q * 200.0 + total_revenue / 10000.0 * equity / 100.0 + goal_index * 2000.0
+	var s := reputation * 1000.0 + best_q * 200.0 + total_revenue / 10000.0 * equity / 100.0 + goals_count() * 2000.0
 	if ending.get("id", "") == "aligned":
 		s *= 2.0
 	return int(s)
+
+
+# ---------------------------------------------------------------- Personal: Energie, Stimmung, Urlaub, Gehaltswünsche
+
+## Wirksames Können: erschöpfte oder unzufriedene Leute leisten weniger, Urlauber gar nichts
+func eff_skill(p: Dictionary) -> float:
+	if int(p.get("vacation", 0)) > 0:
+		return 0.0
+	var energy := float(p.get("energy", 100.0))
+	var morale := float(p.get("morale", 70.0))
+	return float(p["skill"]) * (0.55 + 0.45 * energy / 100.0) * (0.85 + 0.3 * morale / 100.0)
+
+func managers() -> Array:
+	var out := []
+	for p in staff:
+		if p["role"] == "manager" and int(p.get("vacation", 0)) == 0:
+			out.append(p)
+	return out
+
+## Wie viele Leute die Manager betreuen können
+func manager_capacity() -> int:
+	var c := 0
+	for m in managers():
+		c += 6 + int(float(m["skill"]) * 1.5)
+	return c
+
+func managed() -> bool:
+	return not managers().is_empty() and manager_capacity() >= staff.size() - managers().size()
+
+func away_count() -> int:
+	var n := 0
+	for p in staff:
+		if int(p.get("vacation", 0)) > 0:
+			n += 1
+	return n
+
+func send_vacation(index: int) -> String:
+	if index < 0 or index >= staff.size():
+		return "Unbekannte Person."
+	var p: Dictionary = staff[index]
+	if int(p.get("vacation", 0)) > 0:
+		return "%s ist schon im Urlaub." % p["name"]
+	p["vacation"] = D.VACATION_DAYS
+	p["morale"] = minf(100.0, float(p.get("morale", 70.0)) + 5.0)
+	_news("%s ist für %d Tage im Urlaub." % [p["name"], D.VACATION_DAYS])
+	revision += 1
+	return ""
+
+func _step_staff() -> void:
+	var training_on := not training.is_empty()
+	var managed_now := managed()
+	var mood_bonus := (6.0 if office_upgrades.has("coffee") else 0.0) + (8.0 if office_upgrades.has("gym") else 0.0) + (8.0 if managed_now else 0.0)
+	var quitters := []
+	for i in range(staff.size()):
+		var p: Dictionary = staff[i]
+		var energy := float(p.get("energy", 100.0))
+		var morale := float(p.get("morale", 70.0))
+		var vac := int(p.get("vacation", 0))
+		if vac > 0:
+			vac -= 1
+			energy = minf(100.0, energy + 6.0)
+			if vac == 0:
+				_news("%s ist erholt zurück aus dem Urlaub." % p["name"])
+				revision += 1
+		else:
+			var drain := D.ENERGY_DRAIN + (D.ENERGY_DRAIN_TRAINING if training_on else 0.0)
+			if office_upgrades.has("gym"):
+				drain *= 0.8
+			energy = maxf(0.0, energy - drain)
+		var target := 55.0 + mood_bonus + (energy - 50.0) * 0.3
+		morale += (target - morale) * 0.01
+		if energy < 15.0:
+			morale -= 0.15
+		p["energy"] = energy
+		p["morale"] = clampf(morale, 0.0, 100.0)
+		p["vacation"] = vac
+		if i > 0 and morale < 22.0 and rng.randf() < 0.003:
+			quitters.append(i)
+	for i in range(quitters.size() - 1, -1, -1):
+		var q: Dictionary = staff[quitters[i]]
+		_news("[color=#f77]Kündigung:[/color] %s war zu unzufrieden und hat das Team verlassen." % q["name"])
+		staff.remove_at(quitters[i])
+		fx.append("incident")
+		revision += 1
+	# Manager: Erschöpfte rechtzeitig in Urlaub schicken (höchstens 15 % gleichzeitig)
+	if managed_now and day % 7 == 0:
+		var tired := []
+		for i in range(staff.size()):
+			if int(staff[i].get("vacation", 0)) == 0 and float(staff[i].get("energy", 100.0)) < 35.0:
+				tired.append(i)
+		tired.sort_custom(func(a, b): return float(staff[a].get("energy", 100.0)) < float(staff[b].get("energy", 100.0)))
+		var limit := maxi(1, int(staff.size() * 0.15))
+		for i in tired:
+			if away_count() >= limit:
+				break
+			staff[i]["vacation"] = D.VACATION_DAYS
+			_news("Manager schickt %s in den Urlaub." % staff[i]["name"])
+			revision += 1
+	# Gehaltswünsche
+	for i in range(staff.size()):
+		var p: Dictionary = staff[i]
+		if day >= int(p.get("next_raise", day + 1)) and int(p.get("vacation", 0)) == 0:
+			p["next_raise"] = day + rng.randi_range(D.RAISE_MIN_DAYS, D.RAISE_MAX_DAYS)
+			var pct := rng.randf_range(0.06, 0.14) + 0.01 * maxf(0.0, float(p["skill"]) - 5.0)
+			if managed_now:
+				if float(p.get("morale", 70.0)) < 55.0 or int(p["skill"]) >= 6:
+					p["salary"] = round(float(p["salary"]) * (1.0 + pct))
+					p["morale"] = minf(100.0, float(p["morale"]) + 12.0)
+					_news("Manager bewilligt %s +%d %% Gehalt." % [p["name"], int(pct * 100)])
+				else:
+					p["salary"] = round(float(p["salary"]) * (1.0 + pct * 0.5))
+					p["morale"] = minf(100.0, float(p["morale"]) + 3.0)
+					_news("Manager einigt sich mit %s auf +%d %% Gehalt." % [p["name"], int(pct * 50)])
+				revision += 1
+			elif event_queue.size() < 3:
+				_push_event("raise", "Gehaltswunsch",
+					"%s (%s, Können %d) möchte %d %% mehr Gehalt: %s statt %s pro Jahr." % [p["name"], D.ROLES[p["role"]]["name"], int(p["skill"]), int(pct * 100), fmt_money(float(p["salary"]) * (1.0 + pct)), fmt_money(p["salary"])],
+					[["Annehmen", "Stimmung deutlich besser."], ["Halbe Erhöhung anbieten", "Kompromiss – kleine Verbesserung."], ["Ablehnen", "Spart Geld, Stimmung sinkt stark (Kündigungsgefahr)."]],
+					{"name": p["name"], "pct": pct})
+
+
+func _resolve_raise(data: Dictionary, choice: int) -> void:
+	for p in staff:
+		if p["name"] == data["name"]:
+			var pct := float(data["pct"])
+			match choice:
+				0:
+					p["salary"] = round(float(p["salary"]) * (1.0 + pct))
+					p["morale"] = minf(100.0, float(p.get("morale", 70.0)) + 15.0)
+				1:
+					p["salary"] = round(float(p["salary"]) * (1.0 + pct * 0.5))
+					p["morale"] = clampf(float(p.get("morale", 70.0)) + (2.0 if rng.randf() < 0.7 else -8.0), 0.0, 100.0)
+				_:
+					p["morale"] = maxf(0.0, float(p.get("morale", 70.0)) - 18.0)
+			revision += 1
+			return
+
+
+# ---------------------------------------------------------------- Eigene Hardware (Büro + Rechenzentren)
+# Einträge: {name, power, count, upkeep (Strom/Tag je Stück), price (Kaufpreis je Stück), day, cond (0–100)}
+
+func _hw_cond(h: Dictionary) -> float:
+	return float(h.get("cond", 100.0))
+
+## Leistung sinkt mit dem Zustand (bei 0 % nur noch halbe Leistung)
+func hw_power(list: Array) -> float:
+	var p := 0.0
+	for h in list:
+		p += float(h["power"]) * int(h["count"]) * (0.5 + 0.5 * _hw_cond(h) / 100.0)
+	return p
+
+func hw_count(list: Array) -> int:
+	var n := 0
+	for h in list:
+		n += int(h["count"])
+	return n
+
+func hw_upkeep(list: Array) -> float:
+	var c := 0.0
+	for h in list:
+		c += float(h["upkeep"]) * int(h["count"])
+	return c
+
+func hw_avg_cond(list: Array) -> float:
+	var n := hw_count(list)
+	if n == 0:
+		return 100.0
+	var s := 0.0
+	for h in list:
+		s += _hw_cond(h) * int(h["count"])
+	return s / n
+
+func _hw_price(h: Dictionary) -> float:
+	return float(h.get("price", float(h["upkeep"]) / D.UPKEEP_SHARE * D.BUY_DAYS))
+
+func hw_maint_cost(list: Array) -> float:
+	var c := 0.0
+	for h in list:
+		c += _hw_price(h) * int(h["count"]) * D.MAINT_SHARE * (100.0 - _hw_cond(h)) / 100.0
+	return c
+
+func _maintain(list: Array, factor := 1.0) -> String:
+	var cost := hw_maint_cost(list) * factor
+	if cost < 1.0:
+		return "Alles in bestem Zustand."
+	if money < cost:
+		return "Nicht genug Geld für die Wartung."
+	book("maint", -cost)
+	for h in list:
+		h["cond"] = 100.0
+	revision += 1
+	return ""
+
+## Wiederverkaufswert je Stück: −20 % pro Jahr, schlechter Zustand mindert
+func hw_resale(h: Dictionary) -> float:
+	var years := maxf(0.0, (day - int(h.get("day", day))) / 365.0)
+	return _hw_price(h) * pow(0.8, years) * (0.5 + 0.5 * _hw_cond(h) / 100.0) * 0.7
+
+## Schwächste und älteste zuerst verkaufen
+func _sell(list: Array, n: int) -> float:
+	list.sort_custom(func(a, b): return float(a["power"]) < float(b["power"]) or (float(a["power"]) == float(b["power"]) and int(a.get("day", 0)) < int(b.get("day", 0))))
+	var value := 0.0
+	while n > 0 and list.size() > 0:
+		var take := mini(n, int(list[0]["count"]))
+		value += hw_resale(list[0]) * take
+		list[0]["count"] = int(list[0]["count"]) - take
+		n -= take
+		if int(list[0]["count"]) <= 0:
+			list.remove_at(0)
+	if value > 0.0:
+		book("hw_sale", value)
+	revision += 1
+	return value
+
+func _hw_add(list: Array, u: Dictionary, n: int) -> void:
+	for h in list:
+		if h["name"] == u["name"] and int(h.get("day", -1)) == day:
+			h["count"] = int(h["count"]) + n
+			return
+	list.append({"name": u["name"], "power": u["power"], "count": n, "upkeep": u["upkeep"], "price": u["price"], "day": day, "cond": 100.0})
+
+func _step_hw() -> void:
+	var lists: Array = [office_hw]
+	for dc in datacenters:
+		lists.append(dc["hw"])
+	for list in lists:
+		for h in list:
+			h["cond"] = maxf(0.0, _hw_cond(h) - D.WEAR_PER_DAY)
+		# Hardware-Labor wartet automatisch zum halben Preis
+		if office_upgrades.has("hwlab") and hw_count(list) > 0 and hw_avg_cond(list) < 70.0:
+			_maintain(list, 0.5)
+
+# ---- Büro-Hardware
+
+func office_power_mult() -> float:
+	var m := D.OFFICE_POWER
+	if office_upgrades.has("solar"):
+		m *= 0.6
+	if office_upgrades.has("battery"):
+		m *= 0.8
+	return m
+
+func daily_office_power() -> float:
+	return hw_upkeep(office_hw) * office_power_mult()
+
+func rented_count() -> int:
+	var n := 0
+	for g in gpus:
+		n += int(g["count"])
+	return n
+
+func buy_office_hw(kind: String, n: int) -> String:
+	n = mini(n, int(office_data()["gpus"]) - gpu_count())
+	if n <= 0:
+		return "Kein Platz im Büro. Gemietete GPUs zurückgeben oder größeres Büro."
+	var u := hw_unit(kind)
+	if u.is_empty():
+		return "Noch kein eigener Chip."
+	n = mini(n, int(money / float(u["price"])))
+	if n <= 0:
+		return "Nicht genug Geld."
+	book("hardware", -(float(u["price"]) * n))
+	_hw_add(office_hw, u, n)
+	revision += 1
+	return ""
+
+func sell_office_hw(n: int) -> float:
+	return _sell(office_hw, n)
+
+func maintain_office() -> String:
+	return _maintain(office_hw)
+
+func maintain_dc(dc_index: int) -> String:
+	return _maintain(datacenters[dc_index]["hw"])
 
 
 # ---------------------------------------------------------------- Berater

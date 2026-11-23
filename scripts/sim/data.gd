@@ -2,10 +2,11 @@ extends RefCounted
 ## Statische Spieldaten. Balance-Werte hier ändern, nicht in lab.gd.
 
 const START_YEAR := 2016
-const END_YEAR := 2032
-const AGI_Q := 185.0
+const END_YEAR := 2036
+const AGI_Q := 180.0
+const RIVAL_AGI_YEAR := 2030        # frühestes Jahr, in dem Helix die AGI schaffen kann
 ## Marktniveau (erwartete Modellqualität) am 1. Januar jedes Jahres ab 2016. Kalibriert am Balance-Bot.
-const EXPECTED_BY_YEAR := [12.0, 18.0, 38.0, 62.0, 78.0, 88.0, 100.0, 115.0, 140.0, 150.0, 158.0, 165.0, 172.0, 180.0, 188.0, 196.0, 205.0, 215.0]
+const EXPECTED_BY_YEAR := [12.0, 18.0, 38.0, 62.0, 78.0, 88.0, 100.0, 115.0, 140.0, 150.0, 158.0, 165.0, 172.0, 180.0, 188.0, 196.0, 205.0, 215.0, 225.0, 235.0, 245.0, 255.0]
 
 const MONTH_NAMES := ["Jan.", "Feb.", "März", "Apr.", "Mai", "Juni", "Juli", "Aug.", "Sep.", "Okt.", "Nov.", "Dez."]
 const MONTH_DAYS_CUM := [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
@@ -15,8 +16,30 @@ const ROLES := {
 	"research": {"name": "Forschung", "color": Color(0.35, 0.65, 1.0), "desc": "Erzeugt Forschungspunkte und hebt die Modellqualität."},
 	"engineer": {"name": "Engineering", "color": Color(1.0, 0.7, 0.25), "desc": "Macht das Training schneller (mehr Rechenleistung pro GPU)."},
 	"safety": {"name": "Safety", "color": Color(0.4, 0.9, 0.5), "desc": "Senkt das Risiko neuer Modelle. Ohne Safety-Team siehst du das Risiko nicht."},
-	"sales": {"name": "Vertrieb", "color": Color(0.9, 0.45, 0.85), "desc": "Mehr Umsatz aus deinen API-Produkten."},
+	"sales": {"name": "Vertrieb", "color": Color(0.9, 0.45, 0.85), "desc": "Mehr Nutzer und Umsatz für deine API-Produkte."},
+	"manager": {"name": "Management", "color": Color(0.95, 0.95, 0.95), "desc": "Kümmert sich ums Team: schickt Erschöpfte in Urlaub, verhandelt Gehaltswünsche, hebt die Stimmung. Betreut 6 + 1,5×Können Leute."},
 }
+
+## Personal
+const VACATION_DAYS := 14
+const ENERGY_DRAIN := 0.22            # Energieverlust pro Arbeitstag
+const ENERGY_DRAIN_TRAINING := 0.12   # zusätzlich, solange ein Training läuft (Crunch)
+const RAISE_MIN_DAYS := 300           # Abstand zwischen Gehaltswünschen
+const RAISE_MAX_DAYS := 520
+const SALARY_BASE := 30000.0
+const SALARY_PER_SKILL := 9000.0
+
+## Beliebtheit: Nutzer verteilen sich nach Attraktivität auf alle Anbieter
+const MARKET_USERS := 40000.0     # Nutzerpotenzial 2016 (wächst mit dem Markt)
+const ARPU := 0.36                # Umsatz pro Nutzer und Tag
+const USER_GROWTH := 0.04         # Anteil der Lücke, der pro Tag aufgeholt wird
+const USER_DECAY := 0.006         # Abwanderung pro Tag, wenn das Modell überholt ist
+const OTHER_APPEAL := 0.8         # restliche Anbieter am Markt
+
+## Eigene Hardware
+const WEAR_PER_DAY := 0.1         # Zustand sinkt pro Tag (Prozentpunkte)
+const MAINT_SHARE := 0.08         # Wartung bei 0 % Zustand kostet 8 % des Kaufpreises
+const OFFICE_POWER := 1.2         # Strompreis-Faktor im Büro (Stadtnetz)
 
 const OFFICES := [
 	{"name": "Garage", "staff": 4, "gpus": 8, "cost": 0.0, "desc": "Wo alles anfängt. Das WLAN reicht bis zur Hälfte."},
@@ -29,6 +52,8 @@ const OFFICES := [
 
 ## Büro-Upgrades: einmal kaufen, gelten dauerhaft (auch nach Umzug)
 const OFFICE_UPGRADES := [
+	{"id": "solar", "name": "Solaranlage", "cost": 60000.0, "min_office": 1, "desc": "Strom für eigene GPUs im Büro −40 %."},
+	{"id": "battery", "name": "Batteriespeicher", "cost": 250000.0, "min_office": 2, "desc": "Sonnenstrom auch nachts: Strom im Büro nochmals −20 %."},
 	{"id": "coffee", "name": "Kaffeebar", "cost": 25000.0, "min_office": 1, "desc": "+10 % Forschungspunkte. Koffein ist auch eine Architektur."},
 	{"id": "meeting", "name": "Konferenzräume", "cost": 150000.0, "min_office": 2, "desc": "+0,04 Modellqualität-Faktor durch bessere Abstimmung."},
 	{"id": "gym", "name": "Fitness & Ruheraum", "cost": 500000.0, "min_office": 3, "desc": "Gehälter steigen halb so schnell, Abwerben wird seltener."},
@@ -73,6 +98,7 @@ const LEDGER_NAMES := {
 	"salary": "Gehälter", "rent": "GPU-Miete", "dc": "Rechenzentren (Strom)", "data": "Trainingsdaten",
 	"hire": "Einstellungen & Abfindungen", "hardware": "Hardware-Kauf", "building": "Büros, Grundstücke & Bau",
 	"chips": "Chip-Entwicklung", "fines": "Strafen, Klagen, Lobby", "other": "Sonstiges",
+	"power": "Strom (Büro-GPUs)", "maint": "Wartung", "hw_sale": "Hardware-Verkauf",
 }
 const DC_UPGRADES := [
 	{"id": "cooling", "name": "Flüssigkühlung", "cost": 0.25, "power": 0.7, "desc": "Strom −30 %"},
@@ -120,13 +146,13 @@ const TECHS := [
 	{"id": "scaling", "kind": "arch", "name": "Skaliertes Pretraining", "quality": 1.15, "eff": 1.25, "rp": 200, "year": 2018, "req": "transformer", "desc": "Mehr Daten, mehr Parameter, effizienteres Training."},
 	{"id": "interp", "kind": "safety", "name": "Interpretierbarkeit", "risk": 0.7, "rp": 200, "year": 2018, "req": "transformer", "desc": "Du verstehst, was im Modell passiert. Risiko neuer Modelle −30 %."},
 	{"id": "rlhf", "kind": "arch", "name": "RLHF-Chat", "quality": 1.25, "eff": 1.25, "rp": 600, "year": 2020, "req": "scaling", "desc": "Menschliches Feedback macht Modelle hilfreich und gesprächig."},
-	{"id": "moe", "kind": "arch", "name": "Mixture of Experts", "quality": 1.35, "eff": 2.0, "rp": 1400, "year": 2021, "req": "rlhf", "desc": "Nur ein Teil des Modells rechnet pro Wort. Training doppelt so effizient."},
-	{"id": "constitution", "kind": "safety", "name": "Verfassungs-Training", "risk": 0.6, "rp": 1000, "year": 2021, "req": "rlhf", "desc": "Das Modell lernt Regeln statt nur Beispiele. Risiko neuer Modelle −40 %."},
-	{"id": "reasoning", "kind": "arch", "name": "Reasoning", "quality": 1.55, "eff": 1.6, "rp": 3000, "year": 2023, "req": "moe", "desc": "Das Modell denkt nach, bevor es antwortet."},
-	{"id": "evals", "kind": "safety", "name": "Automatische Evals", "risk": 0.7, "rp": 2000, "year": 2023, "req": "constitution", "desc": "Tausende Tests pro Nacht. Risiko neuer Modelle −30 %."},
+	{"id": "moe", "kind": "arch", "name": "Mixture of Experts", "quality": 1.35, "eff": 2.0, "rp": 1400, "year": 2022, "req": "rlhf", "desc": "Nur ein Teil des Modells rechnet pro Wort. Training doppelt so effizient."},
+	{"id": "constitution", "kind": "safety", "name": "Verfassungs-Training", "risk": 0.6, "rp": 1000, "year": 2022, "req": "rlhf", "desc": "Das Modell lernt Regeln statt nur Beispiele. Risiko neuer Modelle −40 %."},
+	{"id": "reasoning", "kind": "arch", "name": "Reasoning", "quality": 1.55, "eff": 1.6, "rp": 3000, "year": 2024, "req": "moe", "desc": "Das Modell denkt nach, bevor es antwortet."},
+	{"id": "evals", "kind": "safety", "name": "Automatische Evals", "risk": 0.7, "rp": 2000, "year": 2024, "req": "constitution", "desc": "Tausende Tests pro Nacht. Risiko neuer Modelle −30 %."},
 	{"id": "chipdesign", "kind": "infra", "name": "Eigenes Chip-Design", "rp": 1500, "year": 2021, "req": "scaling", "desc": "Schaltet Chip-Projekte frei: eigene KI-Beschleuniger, stärker und günstiger als Markt-GPUs."},
-	{"id": "fab", "kind": "infra", "name": "Chip-Fertigung", "rp": 4000, "year": 2024, "req": "chipdesign", "desc": "Erlaubt den Bau einer eigenen Chipfabrik: Chips noch billiger, keine Lieferengpässe."},
-	{"id": "agents", "kind": "arch", "name": "Agenten", "quality": 1.75, "eff": 1.5, "rp": 6000, "year": 2025, "req": "reasoning", "desc": "Modelle planen und handeln selbst. Der Weg zur AGI."},
+	{"id": "fab", "kind": "infra", "name": "Chip-Fertigung", "rp": 4000, "year": 2025, "req": "chipdesign", "desc": "Erlaubt den Bau einer eigenen Chipfabrik: Chips noch billiger, keine Lieferengpässe."},
+	{"id": "agents", "kind": "arch", "name": "Agenten", "quality": 1.75, "eff": 1.5, "rp": 6000, "year": 2027, "req": "reasoning", "desc": "Modelle planen und handeln selbst. Der Weg zur AGI."},
 ]
 
 ## Investoren-Runden: Reputation nötig, Geld gegen Anteile
@@ -158,7 +184,7 @@ const GOALS := [
 	{"id": "reasoning", "text": "Erforsche Reasoning"},
 	{"id": "chip", "text": "Entwickle deinen ersten eigenen Chip"},
 	{"id": "agents", "text": "Erforsche Agenten"},
-	{"id": "agi", "text": "Veröffentliche eine AGI (Agenten, Qualität 185+) – und zwar sicher"},
+	{"id": "agi", "text": "Veröffentliche eine AGI (Agenten, Qualität 180+) – und zwar sicher"},
 ]
 
 const OUTLETS := ["TechBlick", "Byte-Rundschau", "Der Prompt", "Netzpuls", "Silicon Sentinel", "Code & Kultur"]

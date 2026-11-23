@@ -7,7 +7,7 @@ static func choose(lab) -> int:
 	var ev: Dictionary = lab.event_queue[0]
 	match ev["id"]:
 		"model_ready": return 1  # API
-		"gray_offer", "journalist", "bench_gaming", "jailbreak": return 1
+		"gray_offer", "journalist", "bench_gaming", "jailbreak", "raise": return 1
 	return 0
 
 static func manage(lab) -> void:
@@ -15,10 +15,10 @@ static func manage(lab) -> void:
 	var best := ""
 	var best_cost := INF
 	for t in D.TECHS:
-		if lab.tech_state(t["id"]) == "available" and float(t["rp"]) < best_cost:
+		if lab.tech_state(t["id"]) == "available" and float(t["rp"]) * (1.6 if t["kind"] == "infra" else 1.0) < best_cost:
 			best = t["id"]
-			best_cost = float(t["rp"])
-	if best != "" and lab.rp >= best_cost:
+			best_cost = float(t["rp"]) * (1.6 if t["kind"] == "infra" else 1.0)
+	if best != "" and lab.rp >= float(lab.tech(best)["rp"]):
 		lab.research(best)
 	# Büro
 	if lab.office < D.OFFICES.size() - 1 and lab.money > float(D.OFFICES[lab.office + 1]["cost"]) * 1.5:
@@ -37,18 +37,37 @@ static func manage(lab) -> void:
 			var s := float(c["skill"]) - 2.0 * int(counts.get(c["role"], 0))
 			if c["role"] == "research":
 				s += 1.0
+			if c["role"] == "manager":
+				s += 10.0 if (lab.staff.size() >= 5 and not lab.managed()) else -20.0
 			if s > pick_score:
 				pick_score = s
 				pick = i
 		lab.hire(pick)
-	# GPUs nach Budget
+	# Personal: ohne Manager selbst in Urlaub schicken
+	if not lab.managed():
+		var limit := maxi(1, int(lab.staff.size() * 0.15))
+		for i in range(lab.staff.size()):
+			if lab.away_count() >= limit:
+				break
+			if float(lab.staff[i].get("energy", 100.0)) < 30.0 and int(lab.staff[i].get("vacation", 0)) == 0:
+				lab.send_vacation(i)
+	# Hardware warten
+	if lab.hw_count(lab.office_hw) > 0 and lab.hw_avg_cond(lab.office_hw) < 65.0:
+		lab.maintain_office()
+	for i in range(lab.datacenters.size()):
+		if lab.hw_avg_cond(lab.datacenters[i]["hw"]) < 65.0:
+			lab.maintain_dc(i)
+	# GPUs nach Budget: mit Polster kaufen, sonst mieten
 	var free: int = int(lab.office_data()["gpus"]) - lab.gpu_count()
 	var budget: float = 0.5 * lab.last_income - lab.daily_salaries() * 0.5 + lab.money / 1000.0 - lab.daily_gpu_cost()
 	var unit: float = lab.gpu_cost(lab.gpu_gen_now())
-	if free > 0 and budget > unit:
+	var buy_price: float = lab.hw_unit("market")["price"]
+	if free > 0 and lab.money > 3000000.0 and burn <= 0.0:
+		lab.buy_office_hw("market", mini(free, int(lab.money * 0.15 / buy_price)))
+	elif free > 0 and budget > unit:
 		lab.rent_gpus(mini(free, int(budget / unit)))
-	elif burn > 0.0 and runway < 45.0 and lab.gpu_count() > 2:
-		lab.return_gpus(lab.gpu_count() / 3)
+	elif burn > 0.0 and runway < 45.0 and lab.rented_count() > 2:
+		lab.return_gpus(lab.rented_count() / 3)
 	manage_infra(lab)
 	# Training
 	if lab.training.is_empty():
@@ -60,13 +79,21 @@ static func manage(lab) -> void:
 			if id != "gray" and lab.data_available(id):
 				data.append(id)
 		d["data"] = data
-		var chosen := _pick_size(lab, d)
-		if chosen < 0:
-			d["data"] = ["web", "code"]  # Notfall: nur Gratis-Daten
-			chosen = _pick_size(lab, d)
-		if chosen >= 0:
-			d["size_index"] = chosen
-			lab.start_training(d)
+		# Volle Daten vs. Gratis-Daten: die Variante mit der höheren Qualität nehmen
+		var best_d := {}
+		var best_q := -1.0
+		for data_set in [data, ["web", "code"]]:
+			var cand: Dictionary = d.duplicate(true)
+			cand["data"] = data_set
+			var si := _pick_size(lab, cand)
+			if si >= 0:
+				cand["size_index"] = si
+				var q: float = lab.evaluate_design(cand)["q"]
+				if q > best_q:
+					best_q = q
+					best_d = cand
+		if not best_d.is_empty():
+			lab.start_training(best_d)
 	# Ältestes API-Modell zurückziehen, wenn mehr als 2 laufen
 	var apis := []
 	for m in lab.models:
@@ -81,7 +108,7 @@ static func _pick_size(lab, d: Dictionary) -> int:
 	for si in range(D.SIZES.size()):
 		d["size_index"] = si
 		var ev: Dictionary = lab.evaluate_design(d)
-		if ev["train_days"] <= 60.0 and ev["data_cost"] < lab.money * 0.3:
+		if ev["train_days"] <= 60.0 and ev["data_cost"] < lab.money * 0.5:
 			chosen = si
 	return chosen
 
@@ -119,7 +146,7 @@ static func manage_infra(lab) -> void:
 		var free: int = lab.dc_slots(dc) - lab.dc_used(dc)
 		if free <= 0:
 			continue
-		if lab.last_income <= lab.last_cost:
+		if lab.last_income <= lab.last_cost or lab.money < 3000000.0:
 			break
 		var price: float = lab.hw_unit(kind)["price"]
 		var n: int = mini(free, int(lab.money * 0.2 / price))

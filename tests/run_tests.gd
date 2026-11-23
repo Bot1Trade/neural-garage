@@ -26,6 +26,9 @@ func _init() -> void:
 	test_audio_files()
 	test_focus_budget()
 	test_advice_and_ledger()
+	test_staff_system()
+	test_popularity()
+	test_hardware()
 	print("Tests: %d ok, %d fehlgeschlagen" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 
@@ -209,6 +212,95 @@ func test_advice_and_ledger() -> void:
 	for k in lab2.ledger_year:
 		sum += float(lab2.ledger_year[k])
 	check(absf((80000.0 + sum) - lab2.money) < 1.0, "Kassenbuch erklärt den Kontostand")
+
+func test_staff_system() -> void:
+	var lab := new_lab()
+	lab.staff.append(lab._make_person("research", 3))
+	var p: Dictionary = lab.staff[1]
+	var sal0: float = p["salary"]
+	check(float(p["energy"]) == 100.0 and int(p["vacation"]) == 0, "Neue Leute: volle Energie")
+	for i in range(200):
+		lab._step_staff()
+		lab.day += 1
+	check(float(p["energy"]) < 70.0, "Energie sinkt mit der Arbeit (%.0f)" % p["energy"])
+	var before: float = lab.eff_skill(p)
+	check(lab.send_vacation(1) == "", "Urlaub")
+	check(lab.eff_skill(p) == 0.0, "Im Urlaub keine Leistung")
+	for i in range(14):
+		lab._step_staff()
+		lab.day += 1
+	check(int(p["vacation"]) == 0 and float(p["energy"]) > 90.0, "Erholt zurück")
+	check(lab.eff_skill(p) > before, "Nach Urlaub mehr Leistung")
+	lab._grow_staff()
+	check(float(p["salary"]) == sal0, "Gehalt steigt nicht automatisch")
+	p["next_raise"] = lab.day
+	lab.event_queue.clear()
+	lab._step_staff()
+	check(not lab.event_queue.is_empty() and lab.event_queue[0]["id"] == "raise", "Gehaltswunsch als Ereignis")
+	lab.resolve_event(0)
+	check(float(p["salary"]) > sal0, "Gehaltserhöhung angenommen")
+	# Manager übernimmt
+	var lab2 := new_lab()
+	lab2.staff.append(lab2._make_person("manager", 5))
+	lab2.staff.append(lab2._make_person("research", 3))
+	check(lab2.managed(), "Manager betreut das Team")
+	lab2.staff[2]["energy"] = 20.0
+	lab2.day = 7
+	lab2._step_staff()
+	check(int(lab2.staff[2]["vacation"]) > 0, "Manager schickt Erschöpfte in Urlaub")
+	lab2.staff[2]["next_raise"] = lab2.day
+	lab2.event_queue.clear()
+	lab2._step_staff()
+	check(lab2.event_queue.is_empty(), "Manager verhandelt Gehaltswunsch selbst")
+
+func test_popularity() -> void:
+	var lab := new_lab()
+	var d: Dictionary = lab.default_design()
+	d["arch"] = "rnn"
+	lab.start_training(d)
+	while lab.models.is_empty():
+		lab.step_day()
+		while not lab.event_queue.is_empty() and lab.event_queue[0]["id"] != "model_ready":
+			lab.resolve_event(0)
+	lab.event_queue.clear()
+	var id: int = lab.models[0]["id"]
+	lab.release_model(id, "api")
+	var m: Dictionary = lab.get_model(id)
+	var u0: float = m["users"]
+	check(u0 > 0.0, "Start-Hype: erste Nutzer")
+	for i in range(60):
+		lab._step_users()
+	check(float(m["users"]) > u0 * 2.0, "Nutzer wachsen (%.0f → %.0f)" % [u0, m["users"]])
+	var peak: float = m["users"]
+	lab.day += 365 * 2
+	for i in range(30):
+		lab._step_users()
+	check(float(m["users"]) < peak and float(m["users"]) > peak * 0.7, "Veraltetes Modell verliert Nutzer nur langsam")
+	check(lab.model_revenue(m) > 0.0 and lab.popularity(m) > 0.0, "Umsatz und Beliebtheit")
+
+func test_hardware() -> void:
+	var lab := new_lab()
+	lab.money = 1000000.0
+	var p0: float = lab.compute_power()
+	check(lab.buy_office_hw("market", 4) == "", "GPUs fürs Büro kaufen")
+	check(lab.gpu_count() == 6, "Büro: 2 gemietet + 4 gekauft")
+	check(lab.compute_power() > p0, "Mehr Leistung")
+	check(lab.daily_office_power() > 0.0, "Gekaufte GPUs kosten Strom")
+	var pw: float = lab.daily_office_power()
+	lab.money = 1000000.0
+	lab.office = 1
+	lab.buy_office_upgrade("solar")
+	check(lab.daily_office_power() < pw * 0.7, "Solaranlage senkt Strom")
+	for i in range(300):
+		lab._step_hw()
+	check(lab.hw_avg_cond(lab.office_hw) < 75.0, "Hardware nutzt sich ab")
+	var worn: float = lab.compute_power()
+	check(lab.maintain_office() == "", "Wartung")
+	check(lab.compute_power() > worn, "Wartung bringt Leistung zurück")
+	var m0: float = lab.money
+	lab.day += 365
+	var v: float = lab.sell_office_hw(2)
+	check(v > 0.0 and lab.money > m0 and lab.gpu_count() == 4, "Verkaufen bringt Geld")
 
 func test_bankrupt() -> void:
 	var lab := new_lab()

@@ -58,8 +58,7 @@ func play(seed_value: int) -> RefCounted:
 			Bot.manage(lab)
 		if lab.day % 365 == 0:
 			snaps.append("%d: Geld %s, +%s/-%s pro Tag, Rep %.0f, bestQ %.0f/erw %.0f, Büro %d, Team %d, GPUs %d" % [lab.year(), lab.fmt_money(lab.money), lab.fmt_money(lab.last_income), lab.fmt_money(lab.last_cost), lab.reputation, lab.best_q, lab.expected_quality(), lab.office, lab.staff.size(), lab.gpu_count()])
-		for i in range(lab.goal_index):
-			var gid: String = D.GOALS[i]["id"]
+		for gid in lab.flags.get("goals", {}):
 			if not goal_days.has(gid):
 				goal_days[gid] = lab.day
 	if lab.ending.get("id", "") == "aligned":
