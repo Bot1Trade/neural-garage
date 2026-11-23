@@ -38,6 +38,37 @@ func _init() -> void:
 		main._open_tab(t)
 		await process_frame
 	check(main.drawer.visible, "Seitenleiste offen")
+	# Verhandlung: nach Abschluss Ergebnis zeigen, "Schließen" schließt
+	main.lab.money = 50000000.0
+	main.lab._init_companies()
+	main._open_negotiation("nova")
+	await process_frame
+	check(main.nego_popup.visible, "Verhandlungsfenster offen")
+	var r: Dictionary = main.lab.make_offer("nova", main.lab.negotiation("nova")["reserve"] * 1.01, 0.0)
+	main._open_negotiation("nova", r)
+	await process_frame
+	var texts := []
+	for n in main.nego_popup.find_children("*", "Label", true, false):
+		texts.append((n as Label).text)
+	check(" ".join(texts).contains("gehört jetzt dir"), "Ergebnis wird angezeigt")
+	var close_btn: Button = null
+	for n in main.nego_popup.find_children("*", "Button", true, false):
+		if (n as Button).text == "Schließen":
+			close_btn = n
+	check(close_btn != null, "Knopf Schließen vorhanden")
+	if close_btn:
+		close_btn.pressed.emit()
+	await process_frame
+	check(not main.nego_popup.visible, "Fenster geht nach Abschluss zu")
+	# Abbruch durch Gegenseite
+	main.lab.start_negotiation("kestrel")
+	var res: float = main.lab.negotiation("kestrel")["reserve"]
+	main._open_negotiation("kestrel")
+	for i in range(3):
+		r = main.lab.make_offer("kestrel", res * 0.85, 0.0)
+	main._open_negotiation("kestrel", r)
+	await process_frame
+	check(main.nego_popup.visible and r["result"] == "walkaway", "Abbruch wird angezeigt")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://slot_3.json"))
 	main.queue_free()
 	await process_frame

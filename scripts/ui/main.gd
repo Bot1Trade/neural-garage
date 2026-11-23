@@ -1223,10 +1223,12 @@ func _build_market() -> void:
 
 ## Verhandlungsfenster für eine Komplettübernahme
 func _open_negotiation(id: String, reply := {}) -> void:
-	var err: String = lab.start_negotiation(id)
-	if err != "":
-		_show_error(err)
-		return
+	var final: bool = not reply.is_empty() and reply.get("result", "") in ["accept", "walkaway"]
+	if not final:
+		var err: String = lab.start_negotiation(id)
+		if err != "":
+			_show_error(err)
+			return
 	if nego_popup == null:
 		nego_popup = PopupPanel.new()
 		nego_popup.add_theme_stylebox_override("panel", _hud_style(Color(0.09, 0.1, 0.13, 0.98), 10))
@@ -1255,7 +1257,9 @@ func _open_negotiation(id: String, reply := {}) -> void:
 		var col: Color = {"accept": C_GOOD, "counter": C_WARN, "insulted": C_BAD, "walkaway": C_BAD}.get(reply["result"], C_TEXT)
 		v.add_child(_wrap(reply["text"], col))
 		if reply["result"] in ["accept", "walkaway"]:
-			v.add_child(_button("Schließen", func(): nego_popup.hide(); built_rev = -1))
+			var cl := _button("Schließen", func(): nego_popup.hide(); built_rev = -1; _build_market())
+			cl.custom_minimum_size.y = 40
+			v.add_child(cl)
 			_popup_center(nego_popup)
 			return
 	else:
