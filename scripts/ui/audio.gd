@@ -2,7 +2,7 @@ extends Node
 ## Musik-Playlist + Soundeffekte. Lautstärke/Stumm in user://settings.json (getrennt vom Spielstand).
 ## Musik: OpenGameArt (CC0), Effekte: Kenney Interface Sounds, Digital Audio, Music Jingles (CC0).
 
-const SETTINGS_PATH := "user://settings.json"
+const Settings = preload("res://scripts/ui/settings.gd")
 const MUSIC := ["res://assets/music/lofi_loop.ogg", "res://assets/music/chill_lofi.ogg", "res://assets/music/electronic_loop.ogg"]
 const S := "res://assets/kenney/sounds/"
 ## Name → [Datei, Lautstärke in dB]
@@ -124,11 +124,7 @@ func _apply() -> void:
 
 
 func _load_settings() -> void:
-	if not FileAccess.file_exists(SETTINGS_PATH):
-		return
-	var d = JSON.parse_string(FileAccess.get_file_as_string(SETTINGS_PATH))
-	if typeof(d) != TYPE_DICTIONARY:
-		return
+	var d := Settings.load_all()
 	music_volume = float(d.get("music_volume", music_volume))
 	sfx_volume = float(d.get("sfx_volume", sfx_volume))
 	music_on = bool(d.get("music_on", music_on))
@@ -136,6 +132,4 @@ func _load_settings() -> void:
 
 
 func _save_settings() -> void:
-	var f := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
-	if f != null:
-		f.store_string(JSON.stringify({"music_volume": music_volume, "sfx_volume": sfx_volume, "music_on": music_on, "sfx_on": sfx_on}))
+	Settings.save_keys({"music_volume": music_volume, "sfx_volume": sfx_volume, "music_on": music_on, "sfx_on": sfx_on})

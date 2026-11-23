@@ -8,6 +8,7 @@ const Bot = preload("res://scripts/sim/bot.gd")
 const Office3D = preload("res://scripts/ui/office_3d.gd")
 const Tutorial = preload("res://scripts/ui/tutorial.gd")
 const Audio = preload("res://scripts/ui/audio.gd")
+const Settings = preload("res://scripts/ui/settings.gd")
 
 const SAVE_PATH := "user://save.json"
 const SPEEDS := [0.0, 0.6, 0.25, 0.08]     # Sekunden pro Spieltag
@@ -69,6 +70,8 @@ var goal_pill: Label
 var audio: Node
 var ui_ready := false
 var sound_popup: PopupPanel
+var gfx_popup: PopupPanel
+var gfx: Dictionary = {"tilt_shift": true, "msaa": 2, "scale": 1, "shadows": 2, "fullscreen": false}
 var office_view: Control
 var tutorial: PanelContainer
 var design_info: RichTextLabel
@@ -89,6 +92,7 @@ func _ready() -> void:
 	add_child(audio)
 	theme = _make_theme()
 	_build_ui()
+	_load_gfx()
 	_new_game()
 	ui_ready = true
 	var args := OS.get_cmdline_user_args()
@@ -154,6 +158,9 @@ func _unhandled_input(e: InputEvent) -> void:
 				_set_speed(2)
 			KEY_3:
 				_set_speed(3)
+			KEY_F11:
+				gfx["fullscreen"] = not bool(gfx["fullscreen"])
+				_apply_gfx()
 			KEY_ESCAPE:
 				drawer.visible = false
 				highlight_tool(-2)
@@ -204,6 +211,8 @@ func _refresh() -> void:
 		_build_research()
 		_build_products()
 		_build_infra()
+		for tb in [tab_team, tab_compute, tab_research, tab_products, tab_infra]:
+			_fit_texts(tb)
 		_build_goals()
 	var key := "%s|%d|%d|%d|%d" % [lab.training.is_empty(), lab.arch_list().size(), _available_data().size(), lab.next_model_id, int(lab.can_see_risk())]
 	if key != design_key:
@@ -328,6 +337,7 @@ func _build_model_tab() -> void:
 	start.custom_minimum_size = Vector2(220, 40)
 	tab_model.add_child(start)
 	_update_design_info()
+	_fit_texts(tab_model)
 
 
 func _update_design_info() -> void:
@@ -821,11 +831,7 @@ func _load() -> void:
 # ================================================================ UI-Aufbau
 
 func _build_ui() -> void:
-	var bg := ColorRect.new()
-	bg.color = C_BG
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(bg)
-	# 3D füllt den ganzen Bildschirm
+	# 3D füllt den ganzen Bildschirm (direkt im Hauptfenster → native Auflösung)
 	office_view = Office3D.new()
 	office_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(office_view)
@@ -925,16 +931,11 @@ func _build_ui() -> void:
 	bh.add_child(view_btn)
 
 	# Tutorial über der Werkzeugleiste
-	var tut_wrap := CenterContainer.new()
-	tut_wrap.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	tut_wrap.offset_top = -300
-	tut_wrap.offset_bottom = -104
-	tut_wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(tut_wrap)
 	tutorial = Tutorial.new()
-	tutorial.custom_minimum_size.x = 680
-	tutorial.size_flags_vertical = Control.SIZE_SHRINK_END
-	tut_wrap.add_child(tutorial)
+	tutorial.position = Vector2(10, 122)
+	tutorial.custom_minimum_size.x = 520
+	tutorial.size = Vector2(520, 0)
+	add_child(tutorial)
 	tutorial.setup(self, tabs)
 
 	# Meldungen unten links
@@ -1000,6 +1001,9 @@ func _build_topbar() -> Control:
 	var snd := _icon_button("icons/musicOn", func(): pass, "Musik & Effekte", 38)
 	snd.pressed.connect(func(): _open_sound_popup(snd))
 	h.add_child(snd)
+	var gb := _icon_button("icons/gear", func(): pass, "Grafik (F11 = Vollbild)", 38)
+	gb.pressed.connect(func(): _open_gfx_popup(gb))
+	h.add_child(gb)
 	h.add_child(_icon_button("icons/save", _save.bind(false), "Speichern", 38))
 	h.add_child(_icon_button("icons/import", _load, "Laden", 38))
 	h.add_child(_icon_button("icons/information", func(): lab.flags["tut"] = 0, "Tutorial neu starten", 38))
@@ -1008,6 +1012,81 @@ func _build_topbar() -> Control:
 
 
 # ---------------------------------------------------------------- HUD-Helfer
+
+## Lange Texte in der Seitenleiste umbrechen, damit nichts über den Rand ragt
+func _fit_texts(root_node: Node) -> void:
+	for n in root_node.find_children("*", "Label", true, false):
+		var l := n as Label
+		if l.autowrap_mode == TextServer.AUTOWRAP_OFF and l.text.length() > 28:
+			l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			l.custom_minimum_size.x = maxf(l.custom_minimum_size.x, 140.0)
+	for n in root_node.find_children("*", "Button", true, false):
+		var b := n as Button
+		if b.text.length() > 26 and not (b is CheckBox) and not (b is OptionButton):
+			b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			b.custom_minimum_size.x = maxf(b.custom_minimum_size.x, 160.0)
+
+
+func _load_gfx() -> void:
+	var d := Settings.load_all()
+	for k in gfx.keys():
+		if d.has("gfx_" + k):
+			gfx[k] = d["gfx_" + k]
+	_apply_gfx()
+
+
+func _apply_gfx() -> void:
+	office_view.apply_graphics(gfx)
+	var want := DisplayServer.WINDOW_MODE_FULLSCREEN if bool(gfx["fullscreen"]) else DisplayServer.WINDOW_MODE_MAXIMIZED
+	if DisplayServer.get_name() != "headless" and DisplayServer.window_get_mode() != want:
+		DisplayServer.window_set_mode(want)
+	var out := {}
+	for k in gfx.keys():
+		out["gfx_" + k] = gfx[k]
+	Settings.save_keys(out)
+
+
+func _open_gfx_popup(anchor: Control) -> void:
+	if gfx_popup == null:
+		gfx_popup = PopupPanel.new()
+		gfx_popup.add_theme_stylebox_override("panel", _hud_style(Color(0.09, 0.1, 0.13, 0.97), 10))
+		var g := GridContainer.new()
+		g.columns = 2
+		g.add_theme_constant_override("h_separation", 14)
+		g.add_theme_constant_override("v_separation", 10)
+		gfx_popup.add_child(g)
+		g.add_child(_label("Kantenglättung", 15, C_DIM))
+		g.add_child(_gfx_option("msaa", ["Aus", "2×", "4×", "8×"]))
+		g.add_child(_label("Render-Auflösung", 15, C_DIM))
+		g.add_child(_gfx_option("scale", ["75 %", "100 %", "150 % (schärfer)", "200 % (max.)"]))
+		g.add_child(_label("Schatten", 15, C_DIM))
+		g.add_child(_gfx_option("shadows", ["Mittel", "Hoch", "Ultra"]))
+		g.add_child(_label("Tilt-Shift", 15, C_DIM))
+		g.add_child(_gfx_check("tilt_shift"))
+		g.add_child(_label("Vollbild (F11)", 15, C_DIM))
+		g.add_child(_gfx_check("fullscreen"))
+		add_child(gfx_popup)
+	var pos := anchor.get_global_rect().position + Vector2(-300, anchor.size.y + 8)
+	gfx_popup.popup(Rect2i(Vector2i(pos), Vector2i(360, 230)))
+
+
+func _gfx_option(key: String, items: Array) -> OptionButton:
+	var o := OptionButton.new()
+	for it in items:
+		o.add_item(it)
+	o.select(int(gfx[key]))
+	o.item_selected.connect(func(i): gfx[key] = i; _apply_gfx(); audio.play("click"))
+	return o
+
+
+func _gfx_check(key: String) -> CheckButton:
+	var c := CheckButton.new()
+	c.button_pressed = bool(gfx[key])
+	c.toggled.connect(func(on): gfx[key] = on; _apply_gfx(); audio.play("click"))
+	return c
+
 
 func _open_sound_popup(anchor: Control) -> void:
 	if sound_popup == null:
@@ -1057,6 +1136,7 @@ func _open_tab(i: int) -> void:
 func highlight_tool(idx: int) -> void:
 	if idx != -2:
 		tut_tool = idx
+	office_view.set_screen_shift(drawer.size.x + 10.0 if drawer.visible else 0.0)
 	for i in range(tool_btns.size()):
 		var active := drawer.visible and tabs.current_tab == i
 		tool_btns[i].modulate = C_WARN if i == tut_tool else (C_ACCENT if active else Color.WHITE)
@@ -1380,12 +1460,14 @@ func _screenshot_mode(args: PackedStringArray) -> void:
 	if wait > 0.0:
 		await get_tree().create_timer(wait).timeout
 	if office_only:
-		office_view.stretch = false
-		office_view.viewport.size = Vector2i(1200, 900)
+		for ch in get_children():
+			if ch != office_view and ch is CanvasItem:
+				ch.visible = false
+		office_view.info_label.visible = false
 		for i in range(3):
 			await get_tree().process_frame
 	await RenderingServer.frame_post_draw
-	var img: Image = office_view.viewport.get_texture().get_image() if office_only else get_viewport().get_texture().get_image()
+	var img: Image = get_viewport().get_texture().get_image()
 	img.save_png(path)
 	print("Screenshot: ", path)
 	get_tree().quit()

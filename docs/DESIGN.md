@@ -153,3 +153,10 @@ Kaffeebar (+10 % Forschung) · Konferenzräume (+Qualität) · Fitness & Ruherau
 - Leben: Mit Kaffeebar holen sich Leute regelmäßig Kaffee (laufen über den Gang und zurück).
 - Welt: ~60 Bäume und Pflanzen, 12 Autos fahren rechts auf den Straßen.
 - Deko-Update: Kleinkram auf Schreibtischen, Wandverkleidung und gerahmte Bilder, Garderobe, Regale, Kühlschrank, Serverecke mit Doppelboden und Racks mit LED-Matrix. Eine Belegungskarte (0,5-m-Raster) füllt freie Flächen automatisch mit Besprechungsecke, Lounge-Sesseln und Pflanzen. Tilt-Shift-Unschärfe (Miniatur-Look). Welt mit Park, Parkplatz und Skyline.
+
+## 13. Auflösung & Layout (23.11.2026)
+
+- 3D wird direkt im Hauptfenster gerendert (native Auflösung, z. B. 2560×1440) statt in einem 1600×900-Zwischenbild.
+- Fenster startet maximiert, Seitenverhältnis frei (`stretch/aspect = expand`). UI skaliert mit, Schrift bleibt scharf.
+- Tutorial oben links (kollidiert nicht mehr mit der Seitenleiste), lange Texte in der Seitenleiste brechen um. Bei offener Seitenleiste rückt die Kamera nach links.
+- Grafik-Menü (Zahnrad oben rechts, gespeichert in `user://settings.json`): Kantenglättung bis 8×, Render-Auflösung 75–200 % (Supersampling), Schatten Mittel/Hoch/Ultra, Tilt-Shift an/aus, Vollbild (F11).

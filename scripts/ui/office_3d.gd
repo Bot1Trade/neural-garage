@@ -1,4 +1,4 @@
-extends SubViewportContainer
+extends Control
 ## 3D-Ansicht (Vollbild): Büro innen oder Weltansicht (Labor, Rechenzentren, Fabrik, Konkurrenz).
 ## Modelle: Kenney Furniture Kit, Mini Characters, City Kit Commercial/Roads, Emotes (alle CC0).
 ## Steuerung: Mausrad = Zoom, rechte Maus = drehen, mittlere/linke Maus ziehen = verschieben, Q/E = drehen.
@@ -41,7 +41,9 @@ const SEAT_Y := 0.16
 
 var lab
 var mode := "office"
-var viewport: SubViewport
+var scene_root: Node3D
+var tilt_shift := true
+var screen_shift_px := 0.0     # Platz, den die Seitenleiste rechts verdeckt
 var world: Node3D
 var camera: Camera3D
 var info_label: Label
@@ -72,22 +74,21 @@ var walls_z: Array = []
 
 
 func _ready() -> void:
-	stretch = true
-	viewport = SubViewport.new()
-	viewport.msaa_3d = Viewport.MSAA_4X
-	viewport.own_world_3d = true
-	add_child(viewport)
+	mouse_filter = Control.MOUSE_FILTER_STOP
+	scene_root = Node3D.new()
+	add_child(scene_root)
 	world = Node3D.new()
-	viewport.add_child(world)
+	scene_root.add_child(world)
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.keep_aspect = Camera3D.KEEP_HEIGHT
 	var ca := CameraAttributesPractical.new()
 	ca.dof_blur_far_enabled = true
 	ca.dof_blur_near_enabled = true
-	ca.dof_blur_amount = 0.05
+	ca.dof_blur_amount = 0.025
 	camera.attributes = ca
-	viewport.add_child(camera)
+	camera.current = true
+	scene_root.add_child(camera)
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
 	e.background_mode = Environment.BG_SKY
@@ -114,7 +115,7 @@ func _ready() -> void:
 	e.adjustment_saturation = 1.15
 	e.adjustment_contrast = 1.05
 	env.environment = e
-	viewport.add_child(env)
+	scene_root.add_child(env)
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-55, -35, 0)
 	sun.light_energy = 1.15
@@ -122,7 +123,7 @@ func _ready() -> void:
 	sun.shadow_enabled = true
 	sun.shadow_blur = 1.5
 	sun.directional_shadow_max_distance = 60.0
-	viewport.add_child(sun)
+	scene_root.add_child(sun)
 	info_label = Label.new()
 	info_label.add_theme_font_size_override("font_size", 14)
 	info_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.7))
@@ -136,6 +137,25 @@ func _ready() -> void:
 	info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	info_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(info_label)
+
+
+## Grafik-Optionen aus dem Einstellungsmenü anwenden
+func apply_graphics(g: Dictionary) -> void:
+	tilt_shift = bool(g.get("tilt_shift", true))
+	var vp := get_viewport()
+	vp.msaa_3d = [Viewport.MSAA_DISABLED, Viewport.MSAA_2X, Viewport.MSAA_4X, Viewport.MSAA_8X][int(g.get("msaa", 2))]
+	var sc: float = [0.75, 1.0, 1.5, 2.0][int(g.get("scale", 1))]
+	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+	vp.scaling_3d_scale = sc
+	var sh: int = int(g.get("shadows", 2))
+	RenderingServer.directional_shadow_atlas_set_size([2048, 4096, 8192][sh], true)
+	RenderingServer.directional_soft_shadow_filter_set_quality([RenderingServer.SHADOW_QUALITY_SOFT_LOW, RenderingServer.SHADOW_QUALITY_SOFT_MEDIUM, RenderingServer.SHADOW_QUALITY_SOFT_HIGH][sh])
+	_update_camera()
+
+
+func set_screen_shift(px: float) -> void:
+	screen_shift_px = px
+	_update_camera()
 
 
 func set_mode(m: String) -> void:
@@ -183,14 +203,18 @@ func _unhandled_key_input(ev: InputEvent) -> void:
 
 
 func _update_camera() -> void:
-	var c := cam_center + pan
 	var r := deg_to_rad(yaw)
+	var vh := maxf(1.0, get_viewport().get_visible_rect().size.y)
+	var right := Vector3(cos(r), 0, -sin(r))
+	var c := cam_center + pan + right * (screen_shift_px * 0.5 * cam_base_size * zoom / vh)
 	camera.position = c + Vector3(sin(r) * 14.0, 11.0, cos(r) * 14.0)
 	camera.look_at(c, Vector3.UP)
 	camera.size = cam_base_size * zoom
 	# Tilt-Shift: Mitte scharf, oben/unten leicht unscharf (Miniatur-Look)
 	var ca := camera.attributes as CameraAttributesPractical
 	if ca != null:
+		ca.dof_blur_far_enabled = tilt_shift
+		ca.dof_blur_near_enabled = tilt_shift
 		var dist := camera.position.distance_to(c)
 		ca.dof_blur_far_distance = dist + camera.size * 0.22
 		ca.dof_blur_far_transition = camera.size * 0.35
