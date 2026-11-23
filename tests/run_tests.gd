@@ -29,6 +29,8 @@ func _init() -> void:
 	test_staff_system()
 	test_popularity()
 	test_hardware()
+	test_market()
+	test_ads_investors_plants()
 	print("Tests: %d ok, %d fehlgeschlagen" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 
@@ -301,6 +303,62 @@ func test_hardware() -> void:
 	lab.day += 365
 	var v: float = lab.sell_office_hw(2)
 	check(v > 0.0 and lab.money > m0 and lab.gpu_count() == 4, "Verkaufen bringt Geld")
+
+func test_market() -> void:
+	var lab := new_lab()
+	lab.money = 500000000.0
+	lab._init_companies()
+	var rent0: float = lab.rent_price(1)
+	var buy0: float = lab.hw_unit("market")["price"]
+	check(lab.buy_stake("skycompute") == "" and lab.stake("skycompute") == 5.0, "5 % SkyCompute gekauft")
+	check(lab.rent_price(1) < rent0, "Cloud-Beteiligung senkt Miete")
+	for i in range(4):
+		lab.buy_stake("siliconix")
+	check(float(lab.hw_unit("market")["price"]) < buy0, "Chip-Beteiligung senkt Kaufpreis")
+	var m0: float = lab.money
+	lab._step_market()
+	check(lab.daily_dividends() > 0.0 and lab.ledger_today.has("dividend"), "Dividenden fließen")
+	check(lab.sell_stake("skycompute") == "" and lab.money > m0, "Anteile verkaufen")
+	for i in range(11):
+		lab.buy_stake("helix")
+	check(lab.controls("helix") and lab.flags.get("helix_controlled", false), "Helix ab 51 % kontrolliert")
+	var cnt: int = lab.rival["count"]
+	lab.rival["next_day"] = 0
+	lab._step_rival()
+	check(int(lab.rival["count"]) == cnt, "Kontrollierte Helix veröffentlicht keine Konkurrenzmodelle")
+	for i in range(20):
+		lab.buy_stake("nova")
+	check(lab.absorbed_labs() == 1, "Nova Minds übernommen")
+
+func test_ads_investors_plants() -> void:
+	var lab := new_lab()
+	lab.money = 50000000.0
+	var d: Dictionary = lab.default_design()
+	lab.start_training(d)
+	while lab.models.is_empty():
+		lab.step_day()
+		lab.event_queue.clear()
+	var id: int = lab.models[0]["id"]
+	lab.release_model(id, "api")
+	var m: Dictionary = lab.get_model(id)
+	var t0: float = lab.target_users(m)
+	check(lab.start_campaign(id, "online") == "", "Werbung starten")
+	check(lab.target_users(m) > t0 * 1.2, "Werbung erhöht Nutzer-Potenzial")
+	check(lab.start_campaign(id, "big") != "", "Nur eine Kampagne gleichzeitig")
+	check(lab.start_roadshow() == "", "Roadshow starten")
+	lab.event_queue.clear()
+	lab.day = int(lab.flags["roadshow_until"])
+	lab._step_roadshow()
+	check(not lab.event_queue.is_empty() and lab.event_queue[0]["id"] == "offer", "Roadshow bringt Angebot")
+	var eq: float = lab.equity
+	var mon: float = lab.money
+	lab.resolve_event(0)
+	check(lab.equity < eq and lab.money > mon, "Angebot angenommen")
+	lab.day = 365 * 6
+	lab.buy_plot("p3")
+	check(lab.build_plant("solarpark", "p3") == "", "Solarpark bauen")
+	check(lab.plot_state("p3") == "plant" and lab.energy_output() > 0.0, "Kraftwerk liefert Strom")
+	check(lab._energy_credit(100.0) > 100.0, "Überschuss wird verkauft")
 
 func test_bankrupt() -> void:
 	var lab := new_lab()

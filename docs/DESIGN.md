@@ -189,3 +189,14 @@ Kaffeebar (+10 % Forschung) · Konferenzräume (+Qualität) · Fitness & Ruherau
 - „Neues Spiel“ fragt nach.
 - Team: Rollen-Übersicht, Bewerbungen oben, Entlassen nur als kleines ×, lange Namen gekürzt.
 - Compute heißt „GPUs mieten“; Produkte als Tabelle (Modell · Status · Bewertung farbig · Umsatz · Risiko · Aktion); Training zeigt alle Modell-Details.
+
+## 18. Großes Wirtschafts-Update (24.11.2026)
+
+Vorbilder: Game Dev Tycoon (Personal, Forschungsbaum), Mad Games Tycoon 2 (Konkurrenz aufkaufen, Beteiligungen), Software Inc. (Energie/Hardware), Two Point (Mitarbeiter-Bedürfnisse).
+- **Personal:** Energie, Stimmung, Urlaub (14 Tage), Kündigung bei Frust. Gehälter ~40 % niedriger; Erhöhungen nur noch als Gehaltswunsch alle ~1–1,5 Jahre (annehmen/halb/ablehnen). Rolle **Management**: Urlaub + Verhandlungen automatisch, +Stimmung, betreut 6 + 1,5×Können Leute.
+- **Beliebtheit:** Nutzer & Marktanteil je API-Modell (Start-Hype, langsamer Aufbau, langsame Abwanderung statt Wertverfall). Werbung (Online/Kampagne) erhöht das Nutzerpotenzial.
+- **Hardware:** GPUs im Büro kaufen oder mieten; gekauft = nur Strom, Verschleiß + Wartung, Wiederverkauf. Solaranlage, Batteriespeicher; eigene Solar-/Windparks auf Grundstücken (Überschuss wird verkauft).
+- **Firmenmarkt (Taste K):** 8 Firmen, Anteile in 5-%-Schritten, Kursschwankungen, Dividenden. Chip-/Cloud-/Energie-/Medien-Beteiligungen senken Kosten. KI-Labore übernehmen (100 %), Helix ab 51 % kontrollieren.
+- **Investoren:** Roadshow selbst starten, zufällige Angebote, spätes Übernahmeangebot (Ende „Verkauft“).
+- **Bedienung:** Forschungsbaum, 3 Speicherplätze + Autosave (F5), Tempo 1×/2×/5×.
+- **Länger:** Reasoning 2024, Agenten 2027, Helix-AGI frühestens 2030, Ende 2036. Bot gewinnt Median 2027.

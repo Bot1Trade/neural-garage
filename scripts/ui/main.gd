@@ -23,6 +23,7 @@ const TOOLS := [
 	{"icon": "icons/trophy", "title": "Ziele", "tip": "Ziele"},
 	{"icon": "icons/exclamation", "title": "Neuigkeiten", "tip": "Alle Neuigkeiten"},
 	{"icon": "icons/barsVertical", "title": "Finanzen", "tip": "Wofür geht das Geld raus? (Taste F)"},
+	{"icon": "icons/menuGrid", "title": "Firmen", "tip": "Firmenmarkt: Beteiligungen, Übernahmen, Investoren"},
 	{"icon": "emotes/emote_question", "title": "Berater", "tip": "Tipps, wie du effektiver wirst (Taste B)"},
 ]
 
@@ -59,6 +60,8 @@ var tab_products: VBoxContainer
 var tab_infra: VBoxContainer
 var tab_finance: VBoxContainer
 var tab_advisor: VBoxContainer
+var tab_market: VBoxContainer
+var market_day := -1
 var finance_day := -1
 var advisor_day := -1
 var last_advice_toast := -1000
@@ -191,6 +194,8 @@ func _unhandled_input(e: InputEvent) -> void:
 			KEY_F:
 				_open_tab(8)
 			KEY_B:
+				_open_tab(10)
+			KEY_K:
 				_open_tab(9)
 
 
@@ -259,7 +264,9 @@ func _refresh() -> void:
 			rb["btn"].disabled = lab.rp < rb["cost"]
 	if drawer.visible and tabs.current_tab == 8 and lab.day != finance_day:
 		_build_finance()
-	if drawer.visible and tabs.current_tab == 9 and (lab.day - advisor_day >= 3 or lab.revision != built_rev or advisor_day < 0):
+	if drawer.visible and tabs.current_tab == 9 and (lab.day != market_day or lab.revision != built_rev):
+		_build_market()
+	if drawer.visible and tabs.current_tab == 10 and (lab.day - advisor_day >= 3 or lab.revision != built_rev or advisor_day < 0):
 		_build_advisor()
 	_advisor_toast()
 	if chip_bar != null and not lab.chip_project.is_empty():
@@ -884,7 +891,14 @@ func _build_products() -> void:
 				act.add_child(_button("API", func(): _release(id, "api"), "Täglicher Umsatz"))
 				act.add_child(_button("Open", func(): _release(id, "open"), "Viel Ruf und FP, doppeltes Risiko"))
 			"api":
-				act.add_child(_button("Zurückziehen", func(): lab.withdraw_model(id), "Kein Umsatz mehr, aber auch kein Risiko mehr."))
+				if int(m.get("ad_until", 0)) > lab.day:
+					act.add_child(_label("Werbung %d T." % (int(m["ad_until"]) - lab.day), 13, C_WARN))
+				else:
+					for ad in D.ADS:
+						var adid: String = ad["id"]
+						act.add_child(_button("Werbung" if adid == "online" else "Kampagne", func(): _show_error(lab.start_campaign(id, adid)),
+							"%s: %s – +%d %% Nutzer-Potenzial für %d Tage" % [ad["name"], lab.fmt_money(lab.ad_cost(adid)), int(float(ad["boost"]) * 100), ad["days"]]))
+				act.add_child(_button("×", func(): lab.withdraw_model(id), "Zurückziehen: kein Umsatz mehr, aber auch kein Risiko mehr."))
 		grid.add_child(act)
 	tab_products.add_child(grid)
 	if withdrawn_hidden > 0:
@@ -992,7 +1006,7 @@ func _plot_box(id: String, big: bool) -> Control:
 	var st: String = lab.plot_state(id)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 6)
-	var state_txt: String = {"locked": "ab %d im Angebot" % pl["year"], "for_sale": "zu verkaufen", "empty": "dein Grundstück (leer)", "dc": "Rechenzentrum", "fab": "Chipfabrik"}[st]
+	var state_txt: String = {"locked": "ab %d im Angebot" % pl["year"], "for_sale": "zu verkaufen", "empty": "dein Grundstück (leer)", "dc": "Rechenzentrum", "fab": "Chipfabrik", "plant": "Kraftwerk"}[st]
 	v.add_child(_label("%s  ·  %s" % [pl["name"], state_txt], 20 if big else 16, C_ACCENT if st in ["empty", "dc", "fab"] else C_TEXT))
 	v.add_child(_label("%s  ·  Strom ×%.2f  ·  Baukosten ×%.1f" % [loc["name"], loc["power"], loc["build"]], 14, C_DIM))
 	var row := HFlowContainer.new()
@@ -1006,6 +1020,11 @@ func _plot_box(id: String, big: bool) -> Control:
 				if lab.year() >= int(t["year"]):
 					var tid: String = t["id"]
 					row.add_child(_button("%s bauen: %s" % [t["name"], lab.fmt_money(lab.dc_build_cost(tid, id))], func(): _plot_action(lab.build_datacenter(tid, id)), "%s · %d Plätze" % [t["desc"], t["slots"]]))
+			for pt in D.PLANTS:
+				if lab.year() >= int(pt["year"]):
+					var ptid: String = pt["id"]
+					row.add_child(_button("%s bauen: %s" % [pt["name"], lab.fmt_money(float(pt["cost"]) * lab.inflation())], func(): _plot_action(lab.build_plant(ptid, id)),
+						"%s Liefert Strom im Wert von ~%s/Tag." % [pt["desc"], lab.fmt_money(float(pt["output"]) * lab.inflation())]))
 			if lab.techs.has("fab") and not lab.has_fab:
 				row.add_child(_button("Chipfabrik bauen: %s" % lab.fmt_money(D.FAB_COST * lab.inflation()), func(): _plot_action(lab.build_fab(id))))
 			if row.get_child_count() == 0:
@@ -1014,6 +1033,8 @@ func _plot_box(id: String, big: bool) -> Control:
 			row.add_child(_button("Rechenzentrum verwalten", func(): _close_plot_popup(); _open_tab(5)))
 		"fab":
 			row.add_child(_label("Chips halb so teuer, keine Lieferengpässe.", 14, C_GOOD))
+		"plant":
+			row.add_child(_label("Liefert Strom – eigene Kraftwerke gesamt: %s/Tag." % lab.fmt_money(lab.energy_output()), 14, C_GOOD))
 	if row.get_child_count() > 0:
 		v.add_child(row)
 	else:
@@ -1114,6 +1135,63 @@ func _dc_panel(i: int) -> PanelContainer:
 			ups.add_child(_button("%s: %s" % [u["name"], lab.fmt_money(lab.dc_upgrade_cost(dc, id))], func(): _show_error(lab.buy_dc_upgrade(i, id)), u["desc"]))
 	v.add_child(ups)
 	return p
+
+
+func _build_market() -> void:
+	_clear(tab_market)
+	market_day = lab.day
+	lab._init_companies()
+	tab_market.add_child(_label("Dein Labor: ~%s wert · du hältst %.1f %%" % [lab.fmt_money(lab.valuation()), lab.equity], 20, C_ACCENT))
+	var ir := HFlowContainer.new()
+	ir.add_theme_constant_override("h_separation", 8)
+	if int(lab.flags.get("roadshow_until", 0)) > lab.day:
+		ir.add_child(_label("Roadshow läuft – Angebot in %d Tagen." % (int(lab.flags["roadshow_until"]) - lab.day), 14, C_WARN))
+	else:
+		ir.add_child(_button("Investoren suchen (Roadshow): %s" % lab.fmt_money(D.ROADSHOW_COST * lab.inflation()), func(): _show_error(lab.start_roadshow()),
+			"%d Tage Präsentationen, danach ein Angebot je nach Firmenwert und Ruf (10 %% Anteile)." % D.ROADSHOW_DAYS))
+	tab_market.add_child(ir)
+	var div: float = lab.daily_dividends()
+	tab_market.add_child(_label("Dividenden: %s/Tag · Rabatte: GPU-Kauf −%d %% · Miete −%d %% · Strom −%d %% · Werbung −%d %%" % [
+		lab.fmt_money(div), int(lab.chip_discount() * 100), int(lab.cloud_discount() * 100), int(lab.energy_discount() * 100), int(lab.media_discount() * 100)], 14, C_DIM))
+	tab_market.add_child(HSeparator.new())
+	var kinds := {"ai": "KI-Labor", "chip": "Chips", "cloud": "Cloud", "energy": "Energie", "media": "Medien"}
+	var kind_col := {"ai": C_BAD, "chip": C_WARN, "cloud": C_ACCENT, "energy": C_GOOD, "media": Color("d58cf0")}
+	for c in D.COMPANIES:
+		var id: String = c["id"]
+		var st: float = lab.stake(id)
+		var p := PanelContainer.new()
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color("15181e")
+		sb.border_color = kind_col[c["kind"]] if st > 0.0 else C_PANEL2
+		sb.set_border_width_all(1)
+		sb.set_corner_radius_all(6)
+		sb.set_content_margin_all(8)
+		p.add_theme_stylebox_override("panel", sb)
+		var v := VBoxContainer.new()
+		v.add_theme_constant_override("separation", 3)
+		p.add_child(v)
+		var h := HBoxContainer.new()
+		var nl := _label(c["name"], 16)
+		nl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		h.add_child(nl)
+		h.add_child(_label(kinds[c["kind"]], 13, kind_col[c["kind"]]))
+		v.add_child(h)
+		v.add_child(_wrap(c["desc"], C_DIM))
+		var info := "Wert %s · dein Anteil %d %%" % [lab.fmt_money(lab.company_value(id)), int(st)]
+		if st > 0.0:
+			info += " · Dividende %s/Tag" % lab.fmt_money(lab.company_value(id) * float(c["yield"]) / 365.0 * st / 100.0)
+		if c["kind"] == "ai" and lab.controls(id):
+			info += " · " + ("kontrolliert" if id == "helix" else "übernommen")
+		v.add_child(_label(info, 14, C_GOOD if st > 0.0 else C_TEXT))
+		var row := HFlowContainer.new()
+		row.add_theme_constant_override("h_separation", 8)
+		var bb := _button("+%d %%: %s" % [int(D.STAKE_STEP), lab.fmt_money(lab.stake_buy_price(id))], func(): _show_error(lab.buy_stake(id)))
+		bb.disabled = st >= 100.0
+		row.add_child(bb)
+		if st > 0.0:
+			row.add_child(_button("−%d %%: +%s" % [int(D.STAKE_STEP), lab.fmt_money(lab.stake_sell_price(id))], func(): _show_error(lab.sell_stake(id))))
+		v.add_child(row)
+		tab_market.add_child(p)
 
 
 func _build_finance() -> void:
@@ -1526,6 +1604,7 @@ func _build_ui() -> void:
 	news_box.add_theme_font_size_override("bold_font_size", 14)
 	tabs.add_child(news_box)
 	tab_finance = _add_tab("Finanzen")
+	tab_market = _add_tab("Firmen")
 	tab_advisor = _add_tab("Berater")
 
 	# Werkzeugleiste unten
@@ -1541,14 +1620,16 @@ func _build_ui() -> void:
 	var bh := HBoxContainer.new()
 	bh.add_theme_constant_override("separation", 8)
 	bar.add_child(bh)
-	for i in range(TOOLS.size()):
+	tool_btns.resize(TOOLS.size())
+	for i in [0, 1, 2, 3, -1, 4, 5, 9, -1, 6, 7, 8, 10]:
+		if i < 0:
+			bh.add_child(VSeparator.new())   # Gruppen: Labor | Geschäft | Überblick
+			continue
 		var t: Dictionary = TOOLS[i]
 		var b := _tool_button(t["icon"], {7: "News"}.get(i, t["title"]), t["tip"])
 		b.pressed.connect(_open_tab.bind(i))
-		tool_btns.append(b)
+		tool_btns[i] = b
 		bh.add_child(b)
-		if i in [3, 5, 7]:
-			bh.add_child(VSeparator.new())   # Gruppen: Labor | Geschäft | Überblick
 	bh.add_child(VSeparator.new())
 	view_btn = _tool_button("icons/zoomOut", "Welt", "Weltansicht: Labor, Grundstücke, Konkurrenz (Tab)")
 	view_btn.pressed.connect(_toggle_world)
@@ -1771,6 +1852,8 @@ func _open_tab(i: int) -> void:
 	if i == 8:
 		_build_finance()
 	elif i == 9:
+		_build_market()
+	elif i == 10:
 		_build_advisor()
 
 

@@ -7,7 +7,7 @@ static func choose(lab) -> int:
 	var ev: Dictionary = lab.event_queue[0]
 	match ev["id"]:
 		"model_ready": return 1  # API
-		"gray_offer", "journalist", "bench_gaming", "jailbreak", "raise": return 1
+		"gray_offer", "journalist", "bench_gaming", "jailbreak", "raise", "buyout": return 1
 	return 0
 
 static func manage(lab) -> void:
@@ -69,6 +69,7 @@ static func manage(lab) -> void:
 	elif burn > 0.0 and runway < 45.0 and lab.rented_count() > 2:
 		lab.return_gpus(lab.rented_count() / 3)
 	manage_infra(lab)
+	manage_business(lab)
 	# Training
 	if lab.training.is_empty():
 		var d: Dictionary = lab.default_design()
@@ -154,6 +155,31 @@ static func manage_infra(lab) -> void:
 			lab.buy_hardware(i, kind, n)
 		if not dc["upgrades"].has("cooling") and lab.money > lab.dc_upgrade_cost(dc, "cooling") * 4.0:
 			lab.buy_dc_upgrade(i, "cooling")
+
+## Wirtschaft: Werbung, Kraftwerk, Beteiligungen
+static func manage_business(lab) -> void:
+	# Werbung für das beste API-Modell
+	var best := {}
+	for m in lab.models:
+		if m["status"] == "api" and (best.is_empty() or float(m["q"]) > float(best["q"])):
+			best = m
+	if not best.is_empty() and lab.money > lab.ad_cost("big") * 6.0:
+		lab.start_campaign(int(best["id"]), "big")
+	elif not best.is_empty() and lab.money > lab.ad_cost("online") * 8.0:
+		lab.start_campaign(int(best["id"]), "online")
+	# Kraftwerk bei hohen Stromkosten
+	var power: float = lab.daily_office_power() + lab.daily_dc_cost()
+	if power > 2500.0 and lab.energy_output() < power and lab.money > 8000000.0:
+		var pp := pick_plot(lab, 3000000.0)
+		if pp != "":
+			lab.build_plant("windpark" if lab.year() >= 2021 else "solarpark", pp)
+	# Beteiligungen mit überschüssigem Geld
+	if lab.money > 12000000.0:
+		for id in ["voltwerk", "siliconix", "skycompute"]:
+			if lab.stake(id) < 30.0 and lab.money > lab.stake_buy_price(id) * 4.0:
+				lab.buy_stake(id)
+				break
+
 
 ## Freies eigenes Grundstück nehmen oder das günstigste (Strom zählt mit) kaufen
 static func pick_plot(lab, reserve: float) -> String:

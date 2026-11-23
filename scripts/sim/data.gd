@@ -41,6 +41,37 @@ const WEAR_PER_DAY := 0.1         # Zustand sinkt pro Tag (Prozentpunkte)
 const MAINT_SHARE := 0.08         # Wartung bei 0 % Zustand kostet 8 % des Kaufpreises
 const OFFICE_POWER := 1.2         # Strompreis-Faktor im Büro (Stadtnetz)
 
+## Firmenmarkt: Anteile kaufen (5-%-Schritte), Dividenden kassieren, Rabatte über Beteiligungen.
+## value = Börsenwert 2016, yield = jährlicher Gewinn/Wert (Dividende), growth = Wachstum/Jahr,
+## perk = Rabatt bei 100 % Anteil (anteilig), kind bestimmt worauf
+const COMPANIES := [
+	{"id": "helix", "name": "Helix Dynamics", "kind": "ai", "value": 30000000.0, "yield": 0.04, "growth": 0.22, "desc": "Dein großer Rivale. Ab 51 % kontrollierst du Helix – keine AGI-Gefahr mehr von dort."},
+	{"id": "nova", "name": "Nova Minds", "kind": "ai", "value": 3000000.0, "yield": 0.05, "growth": 0.15, "desc": "Kleines KI-Labor. Bei 100 % übernimmst du es: weniger Konkurrenz, +Ruf, neue Leute."},
+	{"id": "kestrel", "name": "Kestrel AI", "kind": "ai", "value": 7000000.0, "yield": 0.05, "growth": 0.17, "desc": "Mittelgroßes KI-Labor. Bei 100 % übernimmst du es: weniger Konkurrenz, +Ruf, neue Leute."},
+	{"id": "siliconix", "name": "Siliconix", "kind": "chip", "value": 40000000.0, "yield": 0.06, "growth": 0.14, "perk": 0.3, "desc": "Großer Chip-Hersteller. Beteiligung senkt deine GPU-Kaufpreise (bis −30 %)."},
+	{"id": "nordchip", "name": "Nordchip", "kind": "chip", "value": 8000000.0, "yield": 0.05, "growth": 0.10, "perk": 0.15, "desc": "Kleiner Chip-Hersteller. Beteiligung senkt GPU-Kaufpreise (bis −15 %)."},
+	{"id": "skycompute", "name": "SkyCompute", "kind": "cloud", "value": 15000000.0, "yield": 0.06, "growth": 0.16, "perk": 0.3, "desc": "Cloud-Anbieter. Beteiligung senkt deine GPU-Miete (bis −30 %)."},
+	{"id": "voltwerk", "name": "VoltWerk Energie", "kind": "energy", "value": 20000000.0, "yield": 0.07, "growth": 0.05, "perk": 0.35, "desc": "Energieversorger. Beteiligung senkt deine Stromkosten (bis −35 %)."},
+	{"id": "pixelfunk", "name": "Pixelfunk Media", "kind": "media", "value": 4000000.0, "yield": 0.06, "growth": 0.08, "perk": 0.5, "desc": "Medienhaus. Beteiligung senkt deine Werbekosten (bis −50 %)."},
+]
+const STAKE_STEP := 5.0           # Prozent pro Kauf/Verkauf
+const STAKE_PREMIUM := 1.08       # Aufpreis beim Kauf, Abschlag beim Verkauf 0,95
+
+## Werbekampagnen für ein API-Modell: mehr Nutzer-Potenzial für eine Weile
+const ADS := [
+	{"id": "online", "name": "Online-Kampagne", "cost": 20000.0, "boost": 0.15, "days": 60},
+	{"id": "big", "name": "Große Kampagne (TV, Messen)", "cost": 140000.0, "boost": 0.35, "days": 90},
+]
+
+## Eigene Kraftwerke auf Grundstücken: Strom deckt eigene Kosten, Überschuss wird zu 40 % verkauft
+const PLANTS := [
+	{"id": "solarpark", "name": "Solarpark", "cost": 2000000.0, "output": 1800.0, "year": 2018, "desc": "Sonnenstrom für deine GPUs. Günstig, mittlere Leistung."},
+	{"id": "windpark", "name": "Windpark", "cost": 5000000.0, "output": 5200.0, "year": 2021, "desc": "Viel Strom, auch nachts. Teurer im Bau."},
+]
+
+const ROADSHOW_COST := 25000.0
+const ROADSHOW_DAYS := 30
+
 const OFFICES := [
 	{"name": "Garage", "staff": 4, "gpus": 8, "cost": 0.0, "desc": "Wo alles anfängt. Das WLAN reicht bis zur Hälfte."},
 	{"name": "Hinterhof-Büro", "staff": 7, "gpus": 24, "cost": 80000.0, "desc": "Zwei Räume, ein Drucker, viel Hoffnung."},
@@ -99,6 +130,7 @@ const LEDGER_NAMES := {
 	"hire": "Einstellungen & Abfindungen", "hardware": "Hardware-Kauf", "building": "Büros, Grundstücke & Bau",
 	"chips": "Chip-Entwicklung", "fines": "Strafen, Klagen, Lobby", "other": "Sonstiges",
 	"power": "Strom (Büro-GPUs)", "maint": "Wartung", "hw_sale": "Hardware-Verkauf",
+	"dividend": "Dividenden", "stake": "Firmenbeteiligungen (Kauf/Verkauf)", "ads": "Werbung", "energy": "Eigene Kraftwerke",
 }
 const DC_UPGRADES := [
 	{"id": "cooling", "name": "Flüssigkühlung", "cost": 0.25, "power": 0.7, "desc": "Strom −30 %"},

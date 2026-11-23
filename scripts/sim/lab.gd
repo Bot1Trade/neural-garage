@@ -7,7 +7,7 @@ const D = preload("res://scripts/sim/data.gd")
 const SAVE_KEYS := ["day", "money", "total_revenue", "reputation", "equity", "office", "staff", "candidates",
 	"gpus", "techs", "rp", "models", "training", "data_unlocked", "flags", "cooldowns", "rival", "goal_index",
 	"investor_stage", "investor_next_day", "broke_days", "best_rating", "best_q", "gpu_price_mult",
-	"gpu_shortage_days", "ending", "news", "news_total", "ledger_days", "ledger_today", "plots", "fab_plot", "office_hw", "last_feedback", "ledger_year", "ledger_last_year", "money_hist", "office_upgrades", "datacenters", "chip_version", "chip_project", "custom_chip", "has_fab", "event_queue", "next_model_id", "era_index"]
+	"gpu_shortage_days", "ending", "news", "news_total", "ledger_days", "ledger_today", "plots", "fab_plot", "office_hw", "companies", "last_feedback", "ledger_year", "ledger_last_year", "money_hist", "office_upgrades", "datacenters", "chip_version", "chip_project", "custom_chip", "has_fab", "event_queue", "next_model_id", "era_index"]
 const INT_KEYS := ["day", "office", "goal_index", "investor_stage", "investor_next_day", "broke_days",
 	"gpu_shortage_days", "next_model_id", "era_index", "news_total", "chip_version"]
 
@@ -52,6 +52,7 @@ var has_fab: bool = false
 var plots: Dictionary = {}            # Grundstück-ID -> "" (leer) | "dc" | "fab"
 var fab_plot: String = ""
 var office_hw: Array = []              # gekaufte GPUs im Büro
+var companies: Dictionary = {}         # Firmen-ID -> {value, stake}
 var last_feedback: Array = []         # letztes Kritik-Feedback (für den Berater)
 var ledger_days: Array = []          # letzte 30 Tage: [{kategorie: betrag}]
 var ledger_today: Dictionary = {}
@@ -145,7 +146,7 @@ func rented_power() -> float:
 func daily_gpu_cost() -> float:
 	var c := 0.0
 	for g in gpus:
-		c += int(g["count"]) * gpu_cost(int(g["gen"]))
+		c += int(g["count"]) * rent_price(int(g["gen"]))
 	return c
 
 
@@ -495,7 +496,8 @@ func model_appeal(m: Dictionary) -> float:
 
 func _total_appeal() -> float:
 	var rival_rel: float = float(rival["best_q"]) / expected_quality()
-	var total := pow(clampf(rival_rel, 0.3, 2.0), 1.6) + D.OTHER_APPEAL
+	var rival_w := 0.4 if flags.get("helix_controlled", false) else 1.0
+	var total := pow(clampf(rival_rel, 0.3, 2.0), 1.6) * rival_w + D.OTHER_APPEAL * (1.0 - 0.3 * absorbed_labs())
 	for m in models:
 		if m["status"] == "api":
 			total += model_appeal(m)
@@ -505,7 +507,7 @@ func _total_appeal() -> float:
 func target_users(m: Dictionary, total := -1.0) -> float:
 	if total < 0.0:
 		total = _total_appeal()
-	return market_users() * model_appeal(m) / total * (0.55 + reputation / 110.0) * sales_mult()
+	return market_users() * model_appeal(m) / total * (0.55 + reputation / 110.0) * sales_mult() * (1.0 + ad_boost(m))
 
 func _step_users() -> void:
 	var total := _total_appeal()
@@ -690,7 +692,7 @@ func dc_used(dc: Dictionary) -> int:
 	return n
 
 func dc_power_mult(dc: Dictionary) -> float:
-	var m := float(dc_loc(dc)["power"])
+	var m := float(dc_loc(dc)["power"]) * (1.0 - energy_discount())
 	for u in D.DC_UPGRADES:
 		if dc["upgrades"].has(u["id"]) and u.has("power"):
 			m *= float(u["power"])
@@ -728,7 +730,8 @@ func plot(id: String) -> Dictionary:
 ## "locked" (noch nicht im Angebot), "for_sale", "empty" (gehört dir), "dc", "fab"
 func plot_state(id: String) -> String:
 	if plots.has(id):
-		return "empty" if plots[id] == "" else String(plots[id])
+		var v := String(plots[id])
+		return "empty" if v == "" else ("plant" if v.begins_with("plant:") else v)
 	if year() < int(plot(id)["year"]):
 		return "locked"
 	return "for_sale"
@@ -804,12 +807,12 @@ func hw_unit(kind: String) -> Dictionary:
 	if kind == "custom":
 		if custom_chip.is_empty():
 			return {}
-		var price := float(custom_chip["base"]) * D.BUY_DAYS * D.CHIP_PRICE * (0.5 if has_fab else 1.0)
+		var price := float(custom_chip["base"]) * D.BUY_DAYS * D.CHIP_PRICE * (0.5 if has_fab else 1.0) * (1.0 - chip_discount())
 		if not has_fab:
 			price *= gpu_price_mult
 		return {"name": custom_chip["name"], "power": float(custom_chip["power"]), "price": price, "upkeep": float(custom_chip["base"]) * D.UPKEEP_SHARE}
 	var gen := gpu_gen_now()
-	return {"name": "GPU Gen %d" % gen, "power": gpu_power(gen), "price": gpu_cost(gen) * D.BUY_DAYS, "upkeep": gpu_cost(gen) / gpu_price_mult * D.UPKEEP_SHARE}
+	return {"name": "GPU Gen %d" % gen, "power": gpu_power(gen), "price": gpu_cost(gen) * D.BUY_DAYS * (1.0 - chip_discount()), "upkeep": gpu_cost(gen) / gpu_price_mult * D.UPKEEP_SHARE}
 
 func buy_hardware(dc_index: int, kind: String, n: int) -> String:
 	var dc: Dictionary = datacenters[dc_index]
@@ -931,6 +934,14 @@ func resolve_event(choice: int) -> void:
 				_news("[color=#fd7]%s:[/color] +%s für %d %% der Anteile." % [inv["name"], fmt_money(inv["money"]), int(inv["equity"])])
 			else:
 				investor_next_day = day + 120
+		"offer":
+			if choice == 0:
+				book("invest", float(data["amount"]))
+				equity -= equity * float(data["pct"]) / 100.0
+				_news("[color=#fd7]Investor:[/color] +%s für %.0f %% der Anteile." % [fmt_money(data["amount"]), data["pct"]])
+		"buyout":
+			if choice == 0:
+				_set_ending("sold", "Verkauft", "Du verkaufst dein Labor für %s. Dein Anteil: %s. Die AGI baut jetzt jemand anderes." % [fmt_money(data["price"]), fmt_money(float(data["price"]) * equity / 100.0)])
 		"rescue":
 			if choice == 0:
 				book("invest", (float(data["amount"])))
@@ -1134,6 +1145,13 @@ func step_day() -> void:
 	book("rent", -daily_gpu_cost())
 	book("dc", -daily_dc_cost())
 	book("power", -daily_office_power())
+	var credit := _energy_credit(daily_office_power() + daily_dc_cost())
+	if credit > 0.0:
+		book("energy", credit)
+		last_cost -= minf(credit, daily_office_power() + daily_dc_cost())
+	_step_market()
+	_step_roadshow()
+	_random_offers()
 	total_revenue += last_income
 	rp += rp_per_day()
 	if day - _last_release_day() > 180:
@@ -1175,7 +1193,7 @@ func _step_risk() -> void:
 			_info("Benchmark-Betrug aufgeflogen", "Forschende haben gezeigt, dass %s die Testfragen kannte. Reputation −15." % m["name"])
 
 func _step_rival() -> void:
-	if day < int(rival["next_day"]):
+	if day < int(rival["next_day"]) or flags.get("helix_controlled", false):
 		return
 	var q := expected_quality() * rng.randf_range(0.95, 1.3)
 	rival["count"] = int(rival["count"]) + 1
@@ -1531,7 +1549,7 @@ func _step_hw() -> void:
 # ---- Büro-Hardware
 
 func office_power_mult() -> float:
-	var m := D.OFFICE_POWER
+	var m := D.OFFICE_POWER * (1.0 - energy_discount())
 	if office_upgrades.has("solar"):
 		m *= 0.6
 	if office_upgrades.has("battery"):
@@ -1570,6 +1588,235 @@ func maintain_office() -> String:
 
 func maintain_dc(dc_index: int) -> String:
 	return _maintain(datacenters[dc_index]["hw"])
+
+
+# ---------------------------------------------------------------- Firmenmarkt, Werbung, Investoren, Kraftwerke
+
+func _init_companies() -> void:
+	if not companies.is_empty():
+		return
+	for c in D.COMPANIES:
+		companies[c["id"]] = {"value": float(c["value"]), "stake": 0.0}
+
+func company(id: String) -> Dictionary:
+	return _find(D.COMPANIES, id)
+
+func stake(id: String) -> float:
+	return float(companies.get(id, {}).get("stake", 0.0))
+
+func company_value(id: String) -> float:
+	return float(companies.get(id, {}).get("value", 0.0))
+
+func stake_buy_price(id: String) -> float:
+	return company_value(id) * D.STAKE_STEP / 100.0 * D.STAKE_PREMIUM
+
+func stake_sell_price(id: String) -> float:
+	return company_value(id) * D.STAKE_STEP / 100.0 * 0.95
+
+func buy_stake(id: String) -> String:
+	_init_companies()
+	if not companies.has(id):
+		return "Unbekannte Firma."
+	if stake(id) >= 100.0:
+		return "Gehört dir schon ganz."
+	var price := stake_buy_price(id)
+	if money < price:
+		return "Nicht genug Geld."
+	book("stake", -price)
+	var before := stake(id)
+	companies[id]["stake"] = minf(100.0, before + D.STAKE_STEP)
+	_news("Beteiligung: %d %% an [b]%s[/b]." % [int(stake(id)), company(id)["name"]])
+	_check_takeover(id, before)
+	revision += 1
+	return ""
+
+func sell_stake(id: String) -> String:
+	if stake(id) <= 0.0:
+		return "Keine Anteile."
+	if controls(id) and stake(id) - D.STAKE_STEP < 51.0 and company(id)["kind"] == "ai" and id != "helix":
+		return "Übernommene Firmen kann man nicht mehr verkaufen."
+	book("stake", stake_sell_price(id))
+	companies[id]["stake"] = maxf(0.0, stake(id) - D.STAKE_STEP)
+	revision += 1
+	return ""
+
+func controls(id: String) -> bool:
+	return stake(id) >= 51.0
+
+## Rabatt aus allen Beteiligungen einer Art (anteilig zum Anteil)
+func _kind_discount(kind: String) -> float:
+	var d := 0.0
+	for c in D.COMPANIES:
+		if c["kind"] == kind:
+			d += float(c.get("perk", 0.0)) * stake(c["id"]) / 100.0
+	return minf(d, 0.5)
+
+func chip_discount() -> float:
+	return _kind_discount("chip")
+
+func cloud_discount() -> float:
+	return _kind_discount("cloud")
+
+func energy_discount() -> float:
+	return _kind_discount("energy")
+
+func media_discount() -> float:
+	return _kind_discount("media")
+
+func rent_price(gen: int) -> float:
+	return gpu_cost(gen) * (1.0 - cloud_discount())
+
+func daily_dividends() -> float:
+	var d := 0.0
+	for c in D.COMPANIES:
+		d += company_value(c["id"]) * float(c["yield"]) / 365.0 * stake(c["id"]) / 100.0
+	return d
+
+func _check_takeover(id: String, before: float) -> void:
+	var c := company(id)
+	if c["kind"] != "ai":
+		return
+	if id == "helix" and before < 51.0 and stake(id) >= 51.0:
+		flags["helix_controlled"] = true
+		reputation = minf(100.0, reputation + 8.0)
+		_info("Helix Dynamics gehört dir!", "Mit %d %% kontrollierst du deinen größten Rivalen. Helix arbeitet jetzt für dich – von dort droht keine AGI mehr, und du kassierst die Dividenden." % int(stake(id)))
+	elif id != "helix" and before < 100.0 and stake(id) >= 100.0:
+		flags["absorbed_" + id] = true
+		reputation = minf(100.0, reputation + 4.0)
+		for i in range(2):
+			if staff.size() < int(office_data()["staff"]):
+				staff.append(_make_person(["research", "engineer"][i], rng.randi_range(4, 7)))
+		_info("%s übernommen" % c["name"], "Das Labor gehört jetzt komplett dir: weniger Konkurrenz am Markt, +4 Ruf und (falls Platz im Büro) zwei erfahrene Leute fürs Team.")
+
+func absorbed_labs() -> int:
+	var n := 0
+	for c in D.COMPANIES:
+		if flags.get("absorbed_" + String(c["id"]), false):
+			n += 1
+	return n
+
+func _step_market() -> void:
+	_init_companies()
+	var y := 1.0 / 365.0
+	for c in D.COMPANIES:
+		var e: Dictionary = companies[c["id"]]
+		var g := float(c["growth"])
+		if c["kind"] == "ai" and c["id"] == "helix":
+			g += 0.02 * float(rival["count"]) / maxf(1.0, years() + 1.0)
+		e["value"] = float(e["value"]) * (1.0 + g * y) * (1.0 + rng.randf_range(-0.012, 0.012))
+	var div := daily_dividends()
+	if div > 0.0:
+		book("dividend", div)
+
+# ---- Werbung
+
+func ad_cost(ad_id: String) -> float:
+	return float(_find(D.ADS, ad_id)["cost"]) * market() * (1.0 - media_discount())
+
+func start_campaign(model_id: int, ad_id: String) -> String:
+	var m := get_model(model_id)
+	if m.is_empty() or m["status"] != "api":
+		return "Werbung nur für API-Modelle."
+	if int(m.get("ad_until", 0)) > day:
+		return "Für dieses Modell läuft schon eine Kampagne."
+	var a := _find(D.ADS, ad_id)
+	var cost := ad_cost(ad_id)
+	if money < cost:
+		return "Nicht genug Geld."
+	book("ads", -cost)
+	m["ad_boost"] = float(a["boost"])
+	m["ad_until"] = day + int(a["days"])
+	_news("Werbung: %s für [b]%s[/b] läuft %d Tage." % [a["name"], m["name"], a["days"]])
+	revision += 1
+	return ""
+
+func ad_boost(m: Dictionary) -> float:
+	return float(m.get("ad_boost", 0.0)) if int(m.get("ad_until", 0)) > day else 0.0
+
+# ---- Investoren
+
+## Grober Firmenwert: Umsatz, Kasse, Ruf, Hardware
+func valuation() -> float:
+	var v := maxf(0.0, last_income - last_cost) * 365.0 * 8.0 + last_income * 365.0 * 2.0 + maxf(0.0, money)
+	v += reputation / 100.0 * 3000000.0 * market()
+	return maxf(v, 500000.0)
+
+func start_roadshow() -> String:
+	if int(flags.get("roadshow_until", 0)) > day:
+		return "Die Roadshow läuft schon."
+	var cost := D.ROADSHOW_COST * inflation()
+	if money < cost:
+		return "Nicht genug Geld."
+	book("other", -cost)
+	flags["roadshow_until"] = day + D.ROADSHOW_DAYS
+	_news("Roadshow gestartet: Du stellst dein Labor %d Tage lang Investoren vor." % D.ROADSHOW_DAYS)
+	revision += 1
+	return ""
+
+func _step_roadshow() -> void:
+	if int(flags.get("roadshow_until", 0)) == day:
+		var pct := 10.0
+		var amount := valuation() * pct / 100.0 * rng.randf_range(0.8, 1.2) * (0.7 + reputation / 200.0)
+		_push_event("offer", "Angebot nach der Roadshow",
+			"Ein Investor bietet %s für %d %% deiner Anteile (Firmenwert ~%s). Du hältst %.1f %%." % [fmt_money(amount), int(pct), fmt_money(valuation()), equity],
+			[["Annehmen", "Geld sofort, deine Anteile sinken."], ["Ablehnen", "Du kannst jederzeit eine neue Roadshow starten."]], {"amount": amount, "pct": pct})
+
+func _random_offers() -> void:
+	if not event_queue.is_empty() or not _cooldown_ok("offer", 240):
+		return
+	if rng.randf() < 0.0025 and equity > 25.0:
+		cooldowns["offer"] = day
+		var pct := rng.randf_range(4.0, 9.0)
+		var amount := valuation() * pct / 100.0 * rng.randf_range(0.9, 1.4)
+		_push_event("offer", "Unerwartete Anfrage",
+			"Ein strategischer Investor möchte einsteigen: %s für %.0f %% deiner Anteile." % [fmt_money(amount), pct],
+			[["Annehmen", "Geld sofort, deine Anteile sinken."], ["Ablehnen", "Kein Problem."]], {"amount": amount, "pct": pct})
+	elif year() >= 2023 and rng.randf() < 0.0006:
+		cooldowns["offer"] = day
+		var price := valuation() * rng.randf_range(1.3, 2.0)
+		_push_event("buyout", "Übernahmeangebot",
+			"Ein Tech-Konzern will dein komplettes Labor kaufen – für %s. Dein Anteil wäre %s wert." % [fmt_money(price), fmt_money(price * equity / 100.0)],
+			[["Verkaufen (Spielende)", "Du gehst mit dem Geld – keine AGI mehr von dir."], ["Ablehnen", "Weiter für die AGI."]], {"price": price})
+
+# ---- Kraftwerke
+
+func plant(id: String) -> Dictionary:
+	return _find(D.PLANTS, id)
+
+func build_plant(type_id: String, plot_id: String) -> String:
+	var pl := plant(type_id)
+	if pl.is_empty():
+		return "Unbekanntes Kraftwerk."
+	if plot_state(plot_id) != "empty":
+		return "Kaufe zuerst ein freies Grundstück (Weltansicht)."
+	if year() < int(pl["year"]):
+		return "Verfügbar ab %d." % pl["year"]
+	var cost := float(pl["cost"]) * inflation()
+	if money < cost:
+		return "Nicht genug Geld."
+	book("building", -cost)
+	plots[plot_id] = "plant:" + type_id
+	fx.append("build")
+	_news("[color=#7fd]Kraftwerk:[/color] %s auf „%s“ liefert jetzt Strom." % [pl["name"], plot(plot_id)["name"]])
+	revision += 1
+	return ""
+
+## Wert des eigenen Stroms pro Tag ($)
+func energy_output() -> float:
+	var o := 0.0
+	for pid in plots:
+		var st := String(plots[pid])
+		if st.begins_with("plant:"):
+			o += float(plant(st.substr(6))["output"])
+	return o * inflation()
+
+## Eigene Kraftwerke decken zuerst die eigenen Stromkosten, Überschuss wird zu 40 % verkauft
+func _energy_credit(power_costs: float) -> float:
+	var out := energy_output()
+	if out <= 0.0:
+		return 0.0
+	var used := minf(out, power_costs)
+	return used + (out - used) * 0.4
 
 
 # ---------------------------------------------------------------- Berater
@@ -1631,8 +1878,18 @@ func advice() -> Array:
 		tips.append({"prio": 45, "icon": "emote_heart", "tab": 1, "text": "Platz für %d weitere Leute und du machst Gewinn – mehr Team bedeutet bessere und schnellere Modelle." % (cap - staff.size())})
 	elif staff.size() >= cap and office < D.OFFICES.size() - 1 and money > float(D.OFFICES[office + 1]["cost"]) * 2.0:
 		tips.append({"prio": 40, "icon": "emote_star", "tab": 5, "text": "Dein Büro ist voll. Ein Umzug (%s) bringt Platz für mehr Personal und GPUs." % D.OFFICES[office + 1]["name"]})
+	# Geld arbeiten lassen
+	var has_stakes := false
+	for c in D.COMPANIES:
+		if stake(c["id"]) > 0.0:
+			has_stakes = true
+	if money > 6000000.0 and not has_stakes:
+		tips.append({"prio": 35, "icon": "emote_cash", "tab": 9, "text": "%s liegen ungenutzt auf dem Konto. Beteiligungen an Chip-, Cloud- oder Energiefirmen bringen Dividenden und senken deine Kosten." % fmt_money(money)})
+	var power := daily_office_power() + daily_dc_cost()
+	if power > 3000.0 and energy_output() <= 0.0 and year() >= 2018:
+		tips.append({"prio": 38, "icon": "emote_idea", "tab": 5, "text": "Strom kostet dich %s/Tag. Ein eigener Solar- oder Windpark auf einem Grundstück deckt das größtenteils." % fmt_money(power)})
 	# Konkurrenz
-	if float(rival["best_q"]) > best_q * 1.15 and best_q > 0.0:
+	if float(rival["best_q"]) > best_q * 1.15 and best_q > 0.0 and not flags.get("helix_controlled", false):
 		tips.append({"prio": 30, "icon": "emote_anger", "tab": 0, "text": "Helix ist dir voraus (Qualität %.0f gegen deine %.0f). Größere Modelle, bessere Daten und mehr Forschende helfen." % [rival["best_q"], best_q]})
 	tips.sort_custom(func(a, b): return int(a["prio"]) > int(b["prio"]))
 	return tips

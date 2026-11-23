@@ -927,6 +927,23 @@ klicken zum Bauen" % region, pos + Vector3(0, 0.3, 0), Color("9fd0ff"), 0.55)
 				_label3d(region, pos + Vector3(0, 0.15, 1.5), Color("a0e8b0"), 0.7)
 				for l in range(2):
 					_add_rack(pos + Vector3(-0.5 + l * 0.6, 0, 1.0))
+			"plant":
+				var kind := String(lab.plots[pl["id"]]).substr(6)
+				_lot(pos, Color("6f8f55"), false)
+				if kind == "solarpark":
+					for r in range(4):
+						for c2 in range(4):
+							var panel := _box(pos + Vector3(-0.95 + c2 * 0.63, 0.22, -0.95 + r * 0.63), Vector3(0.55, 0.03, 0.42), Color("1d3a66"), 0.6, 0.25)
+							panel.rotation_degrees.x = -25.0
+				else:
+					for k in range(3):
+						var tp := pos + Vector3(-0.8 + k * 0.8, 0, -0.5 + (k % 2) * 0.9)
+						_box(tp + Vector3(0, 1.1, 0), Vector3(0.08, 2.2, 0.08), Color("e8ecf0"), 0.2, 0.5)
+						for bl in range(3):
+							var blade := _box(tp + Vector3(0, 2.2, 0.06), Vector3(0.06, 0.9, 0.02), Color("f4f6f8"), 0.1, 0.5)
+							blade.rotation_degrees.z = bl * 120.0 + k * 25.0
+							blade.position += Vector3(sin(deg_to_rad(blade.rotation_degrees.z)) * -0.42, cos(deg_to_rad(blade.rotation_degrees.z)) * 0.42, 0)
+				_label3d(lab.plant(kind)["name"], pos + Vector3(0, 0.15, 1.6), Color("bff0a0"), 0.7)
 			"fab":
 				_place_from(CITY, "building-m", pos, 0.0, Vector3.ONE * 1.6)
 				_label3d("Chipfabrik", pos + Vector3(0, 0.15, 1.8), Color("ffc66b"), 0.8)
